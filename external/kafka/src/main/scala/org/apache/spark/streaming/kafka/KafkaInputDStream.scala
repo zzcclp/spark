@@ -41,6 +41,7 @@ import org.apache.spark.util.Utils
  * @param topics Map of (topic_name -> numPartitions) to consume. Each partition is consumed
  * in its own thread.
  * @param storageLevel RDD storage level.
+ * @param preferredLocation specify a preferred location (hostname).
  */
 private[streaming]
 class KafkaInputDStream[
@@ -52,14 +53,15 @@ class KafkaInputDStream[
     kafkaParams: Map[String, String],
     topics: Map[String, Int],
     useReliableReceiver: Boolean,
-    storageLevel: StorageLevel
+    storageLevel: StorageLevel,
+    preferredLocation: Option[String] = None
   ) extends ReceiverInputDStream[(K, V)](ssc_) with Logging {
 
   def getReceiver(): Receiver[(K, V)] = {
     if (!useReliableReceiver) {
       new KafkaReceiver[K, V, U, T](kafkaParams, topics, storageLevel)
     } else {
-      new ReliableKafkaReceiver[K, V, U, T](kafkaParams, topics, storageLevel)
+      new ReliableKafkaReceiver[K, V, U, T](kafkaParams, topics, storageLevel, preferredLocation)
     }
   }
 }

@@ -55,7 +55,8 @@ class ReliableKafkaReceiver[
   T <: Decoder[_]: ClassTag](
     kafkaParams: Map[String, String],
     topics: Map[String, Int],
-    storageLevel: StorageLevel)
+    storageLevel: StorageLevel,
+    _preferredLocation: Option[String])
     extends Receiver[(K, V)](storageLevel) with Logging {
 
   private val groupId = kafkaParams("group.id")
@@ -175,6 +176,8 @@ class ReliableKafkaReceiver[
       blockOffsetMap = null
     }
   }
+
+  override def preferredLocation = _preferredLocation
 
   /** Store a Kafka message and the associated metadata as a tuple. */
   private def storeMessageAndMetadata(
