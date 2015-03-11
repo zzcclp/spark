@@ -84,6 +84,28 @@ object KafkaUtils {
   }
 
   /**
+   * Create an input stream that pulls messages from a Kafka Broker.
+   * @param ssc         StreamingContext object
+   * @param kafkaParams Map of kafka configuration parameters,
+   *                    see http://kafka.apache.org/08/configuration.html
+   * @param topics      Map of (topic_name -> numPartitions) to consume. Each partition is consumed
+   *                    in its own thread.
+   * @param storageLevel Storage level to use for storing the received objects
+   * @param preferredLocation specify a preferred location (hostname)
+   */
+  def createStream[K: ClassTag, V: ClassTag, U <: Decoder[_]: ClassTag, T <: Decoder[_]: ClassTag](
+      ssc: StreamingContext,
+      kafkaParams: Map[String, String],
+      topics: Map[String, Int],
+      storageLevel: StorageLevel, 
+      preferredLocation: Option[String]
+    ): ReceiverInputDStream[(K, V)] = {
+    val walEnabled = ssc.conf.getBoolean("spark.streaming.receiver.writeAheadLog.enable", false)
+    new KafkaInputDStream[K, V, U, T](ssc, kafkaParams, topics, walEnabled, storageLevel,
+      preferredLocation)
+  }
+
+  /**
    * Create an input stream that pulls messages from Kafka Brokers.
    * Storage level of the data will be the default StorageLevel.MEMORY_AND_DISK_SER_2.
    * @param jssc      JavaStreamingContext object
