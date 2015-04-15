@@ -229,7 +229,7 @@ private class KafkaTestUtils extends Logging {
 
   private def waitUntilMetadataIsPropagated(servers: Seq[KafkaServer], topic: String, partition: Int): Int = {
     var leader: Int = -1
-    eventually(timeout(1000 milliseconds), interval(100 milliseconds)) {
+    eventually(Time(10000), Time(100)) {
       assert(servers.forall { server =>
         val partitionStateOpt = server.apis.metadataCache.getPartitionInfo(topic, partition)
         partitionStateOpt match {
