@@ -154,7 +154,7 @@ private class KafkaTestUtils extends Logging {
   def createTopic(topic: String): Unit = {
     AdminUtils.createTopic(zkClient, topic, 1, 1)
     // wait until metadata is propagated
-    waitUntilMetadataIsPropagated(topic, 0)
+    waitUntilMetadataIsPropagated(Seq(server), topic, 0)
   }
 
   /** Java-friendly function for sending messages to the Kafka broker */
@@ -227,13 +227,20 @@ private class KafkaTestUtils extends Logging {
     tryAgain(1)
   }
 
-  private def waitUntilMetadataIsPropagated(topic: String, partition: Int): Unit = {
-    eventually(Time(10000), Time(100)) {
-      assert(
-        server.apis.metadataCache.containsTopicAndPartition(topic, partition),
-        s"Partition [$topic, $partition] metadata not propagated after timeout"
-      )
+  private def waitUntilMetadataIsPropagated(servers: Seq[KafkaServer], topic: String, partition: Int): Int = {
+    var leader: Int = -1
+    eventually(timeout(1000 milliseconds), interval(100 milliseconds)) {
+      assert(servers.forall { server =>
+        val partitionStateOpt = server.apis.metadataCache.getPartitionInfo(topic, partition)
+        partitionStateOpt match {
+          case Some(partitionState) =>
+            leader = partitionState.leaderIsrAndControllerEpoch.leaderAndIsr.leader
+            leader >= 0 // is valid broker id
+          case _ => false
+        }
+      }, s"Partition [$topic, $partition] metadata not propagated after timeout")
     }
+    leader
   }
 
   private class EmbeddedZookeeper(val zkConnect: String) {
