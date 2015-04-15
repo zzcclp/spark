@@ -227,7 +227,11 @@ private class KafkaTestUtils extends Logging {
     tryAgain(1)
   }
 
-  private def waitUntilMetadataIsPropagated(servers: Seq[KafkaServer], topic: String, partition: Int): Int = {
+  private def waitUntilMetadataIsPropagated(
+      servers: Seq[KafkaServer], 
+      topic: String, 
+      partition: Int
+    ): Int = {
     var leader: Int = -1
     eventually(Time(10000), Time(100)) {
       assert(servers.forall { server =>
