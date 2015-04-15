@@ -17,8 +17,10 @@
 
 package org.apache.spark.streaming
 
+import java.io.File
 import java.util.concurrent.atomic.AtomicInteger
 
+import org.apache.commons.io.FileUtils
 import org.scalatest.{Assertions, BeforeAndAfter, FunSuite}
 import org.scalatest.concurrent.Timeouts
 import org.scalatest.concurrent.Eventually._
@@ -330,6 +332,138 @@ class StreamingContextSuite extends FunSuite with BeforeAndAfter with Timeouts w
     }
   }
 
+  test("getOrCreate") {
+    val conf = new SparkConf().setMaster(master).setAppName(appName)
+    conf.set("newContext", "true")  // to identify the context as new
+
+    // Function to create StreamingContext that has a config to identify it to be new context
+    def creatingFunction(): StreamingContext = {
+      new StreamingContext(conf, batchDuration)
+    }
+
+    // Call ssc.stop after a body of code
+    def withSscStop(body: => Unit): Unit = {
+      try {
+        body
+      } finally {
+        if (ssc != null) {
+          ssc.stop()
+        }
+        ssc = null
+      }
+    }
+
+    val emptyPath = Utils.createTempDir().getAbsolutePath()
+
+    // getOrCreate should create new context with empty path
+    withSscStop {
+      ssc = StreamingContext.getOrCreate(emptyPath, creatingFunction _)
+      assert(ssc != null, "no context created")
+      assert(ssc.conf.getBoolean("newContext", false), "new context not created")
+    }
+
+    val corrutedCheckpointPath = createCorruptedCheckpoint()
+
+    // getOrCreate should throw exception with fake checkpoint file and createOnError = false
+    intercept[Exception] {
+      ssc = StreamingContext.getOrCreate(corrutedCheckpointPath, creatingFunction _)
+    }
+
+    // getOrCreate should throw exception with fake checkpoint file
+    intercept[Exception] {
+      ssc = StreamingContext.getOrCreate(
+        corrutedCheckpointPath, creatingFunction _, createOnError = false)
+    }
+
+    // getOrCreate should create new context with fake checkpoint file and createOnError = true
+    withSscStop {
+      ssc = StreamingContext.getOrCreate(
+        corrutedCheckpointPath, creatingFunction _, createOnError = true)
+      assert(ssc != null, "no context created")
+      assert(ssc.conf.getBoolean("newContext", false), "new context not created")
+    }
+
+    val checkpointPath = createValidCheckpoint()
+
+    // getOrCreate should recover context with checkpoint path
+    withSscStop {
+      ssc = StreamingContext.getOrCreate(checkpointPath, creatingFunction _)
+      assert(ssc != null, "no context created")
+      assert(!ssc.conf.contains("newContext"), "old context not recovered")
+    }
+  }
+
+  test("getOrCreate with existing SparkContext") {
+    val conf = new SparkConf().setMaster(master).setAppName(appName)
+    conf.set("newContext", "true")  // to identify the context as new
+    sc = new SparkContext(conf)
+
+    // Function to create StreamingContext that has a config to identify it to be new context
+    def creatingFunction(sparkContext: SparkContext): StreamingContext = {
+      // context with no output ops
+      new StreamingContext(sparkContext, batchDuration)
+    }
+
+    // Call ssc.stop(stopSparkContext = false) after a body of cody
+    def withSscStop(body: => Unit): Unit = {
+      try {
+        body
+      } finally {
+        if (ssc != null) {
+          ssc.stop(stopSparkContext = false)
+        }
+        ssc = null
+      }
+    }
+
+    val emptyPath = Utils.createTempDir().getAbsolutePath()
+
+    // getOrCreate should create new context with empty path
+    withSscStop {
+      ssc = StreamingContext.getOrCreate(emptyPath, creatingFunction _, sc, createOnError = true)
+      assert(ssc != null, "no context created")
+      assert(ssc.conf.getBoolean("newContext", false),
+        "new StreamingContext does not use existing SparkContext")
+      assert(ssc.graph.getOutputStreams().isEmpty, // number of output ops in new context = 0
+        "created StreamingContext is not new!")
+    }
+
+    val corrutedCheckpointPath = createCorruptedCheckpoint()
+
+    // getOrCreate should throw exception with fake checkpoint file and createOnError = false
+    intercept[Exception] {
+      ssc = StreamingContext.getOrCreate(corrutedCheckpointPath, creatingFunction _, sc)
+    }
+
+    // getOrCreate should throw exception with fake checkpoint file
+    intercept[Exception] {
+      ssc = StreamingContext.getOrCreate(
+        corrutedCheckpointPath, creatingFunction _, sc, createOnError = false)
+    }
+
+    // getOrCreate should create new context with fake checkpoint file and createOnError = true
+    withSscStop {
+      ssc = StreamingContext.getOrCreate(
+        corrutedCheckpointPath, creatingFunction _, sc, createOnError = true)
+      assert(ssc != null, "no context created")
+      assert(ssc.conf.getBoolean("newContext", false),
+        "new StreamingContext does not use existing SparkContext")
+      assert(ssc.graph.getOutputStreams().isEmpty, // number of output ops in new context = 0
+        "created StreamingContext is not new")    }
+
+    val checkpointPath = createValidCheckpoint()
+
+    // StreamingContext.getOrCreate should recover context with checkpoint path
+    withSscStop {
+      ssc = StreamingContext.getOrCreate(checkpointPath, creatingFunction _, sc)
+      assert(ssc != null, "no context created")
+      assert(ssc.conf.getBoolean("newContext", false),
+        "recovered StreamingContext does not use existing SparkContext")
+      assert(ssc.graph.getOutputStreams().nonEmpty,
+        "new StreamingContext created instead of recovering old one")
+    }
+  }
+
   test("DStream and generated RDD creation sites") {
     testPackage.test()
   }
@@ -338,6 +472,29 @@ class StreamingContextSuite extends FunSuite with BeforeAndAfter with Timeouts w
     val input = (1 to 100).map(i => 1 to i)
     val inputStream = new TestInputStream(s, input, 1)
     inputStream
+  }
+
+  def createValidCheckpoint(): String = {
+    val testDirectory = Utils.createTempDir().getAbsolutePath()
+    val checkpointDirectory = Utils.createTempDir().getAbsolutePath()
+    val conf = new SparkConf().setMaster(master).setAppName(appName)
+    ssc = new StreamingContext(conf, batchDuration)
+    ssc.checkpoint(checkpointDirectory)
+    ssc.textFileStream(testDirectory).foreachRDD { rdd => rdd.count() }
+    ssc.start()
+    eventually(timeout(10000 millis)) {
+      assert(Checkpoint.getCheckpointFiles(checkpointDirectory).size > 1)
+    }
+    ssc.stop()
+    checkpointDirectory
+  }
+
+  def createCorruptedCheckpoint(): String = {
+    val checkpointDirectory = Utils.createTempDir().getAbsolutePath()
+    val fakeCheckpointFile = Checkpoint.checkpointFile(checkpointDirectory, Time(1000))
+    FileUtils.write(new File(fakeCheckpointFile.toString()), "blablabla")
+    assert(Checkpoint.getCheckpointFiles(checkpointDirectory).nonEmpty)
+    checkpointDirectory
   }
 }
 
