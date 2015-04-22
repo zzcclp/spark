@@ -17,20 +17,19 @@
 
 package org.apache.spark.streaming.kafka
 
-
 import scala.annotation.tailrec
 import scala.collection.mutable
-import scala.reflect.{classTag, ClassTag}
+import scala.reflect.ClassTag
 
 import kafka.common.TopicAndPartition
 import kafka.message.MessageAndMetadata
 import kafka.serializer.Decoder
 
 import org.apache.spark.{Logging, SparkException}
-import org.apache.spark.rdd.RDD
 import org.apache.spark.streaming.kafka.KafkaCluster.LeaderOffset
 import org.apache.spark.streaming.{StreamingContext, Time}
 import org.apache.spark.streaming.dstream._
+import org.apache.spark.streaming.scheduler.{StreamingListenerBatchCompleted, StreamingListener}
 
 /**
  *  A stream of {@link org.apache.spark.streaming.kafka.KafkaRDD} where
@@ -84,6 +83,11 @@ class DirectKafkaInputDStream[
 
   protected var currentOffsets = fromOffsets
 
+  // Map to manage the time -> topic/partition+offset
+  private val offsetMap = new mutable.HashMap[Time, Map[TopicAndPartition, Long]]()
+  // Add to the listener bus for job completion hook
+  context.addStreamingListener(new DirectKafkaStreamingListener)
+
   @tailrec
   protected final def latestLeaderOffsets(retries: Int): Map[TopicAndPartition, LeaderOffset] = {
     val o = kc.getLatestLeaderOffsets(currentOffsets.keySet)
@@ -118,6 +122,7 @@ class DirectKafkaInputDStream[
       context.sparkContext, kafkaParams, currentOffsets, untilOffsets, messageHandler)
 
     currentOffsets = untilOffsets.map(kv => kv._1 -> kv._2.offset)
+    offsetMap += ((validTime, currentOffsets))
     Some(rdd)
   }
 
@@ -151,6 +156,8 @@ class DirectKafkaInputDStream[
         ok => ok
       )
 
+      offsetMap.clear()
+
       batchForTime.toSeq.sortBy(_._1)(Time.ordering).foreach { case (t, b) =>
           logInfo(s"Restoring KafkaRDD for time $t ${b.mkString("[", ", ", "]")}")
           generatedRDDs += t -> new KafkaRDD[K, V, U, T, R](
@@ -159,4 +166,23 @@ class DirectKafkaInputDStream[
     }
   }
 
+  private[streaming]
+  class DirectKafkaStreamingListener extends StreamingListener {
+
+    val offsetUpdateEnabled = context.conf.getBoolean("spark.streaming.kafka.offsetUpdate", false)
+    val groupId = kafkaParams.getOrElse("group.id", "directKafkaConsumer")
+
+    override def onBatchCompleted(batchCompleted: StreamingListenerBatchCompleted) = synchronized {
+      if (offsetUpdateEnabled) {
+        for (offsets <- offsetMap.get(batchCompleted.batchInfo.batchTime)) {
+          val o = kc.setConsumerOffsets(groupId, offsets)
+          if (o.isLeft) {
+            logWarning(s"Error updating the offset to Kafka cluster: ${o.left.get}")
+          }
+        }
+      }
+
+      offsetMap --= offsetMap.filter(_._1 <= batchCompleted.batchInfo.batchTime).keys
+    }
+  }
 }
