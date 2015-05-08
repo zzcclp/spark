@@ -28,7 +28,7 @@ import org.apache.hadoop.hive.ql.lib.Node
 import org.apache.hadoop.hive.ql.metadata.Table
 import org.apache.hadoop.hive.ql.parse._
 import org.apache.hadoop.hive.ql.plan.PlanUtils
-import org.apache.spark.sql.{AnalysisException, SparkSQLParser}
+import org.apache.spark.sql.AnalysisException
 
 import org.apache.spark.sql.catalyst.analysis._
 import org.apache.spark.sql.catalyst.expressions._
@@ -140,10 +140,7 @@ private[hive] object HiveQl {
     "TOK_TRUNCATETABLE"     // truncate table" is a NativeCommand, does not need to explain.
   ) ++ nativeCommands
 
-  protected val hqlParser = {
-    val fallback = new ExtendedHiveQlParser
-    new SparkSQLParser(fallback.parse(_))
-  }
+  protected val hqlParser = new ExtendedHiveQlParser
 
   /**
    * A set of implicit transformations that allow Hive ASTNodes to be rewritten by transformations
@@ -1249,16 +1246,8 @@ https://cwiki.apache.org/confluence/display/Hive/Enhanced+Aggregation%2C+Cube%2C
     case Token("TOK_FUNCTION", Token(WHEN(), Nil) :: branches) =>
       CaseWhen(branches.map(nodeToExpr))
     case Token("TOK_FUNCTION", Token(CASE(), Nil) :: branches) =>
-      val transformed = branches.drop(1).sliding(2, 2).map {
-        case Seq(condVal, value) =>
-          // FIXME (SPARK-2155): the key will get evaluated for multiple times in CaseWhen's eval().
-          // Hence effectful / non-deterministic key expressions are *not* supported at the moment.
-          // We should consider adding new Expressions to get around this.
-          Seq(EqualTo(nodeToExpr(branches(0)), nodeToExpr(condVal)),
-              nodeToExpr(value))
-        case Seq(elseVal) => Seq(nodeToExpr(elseVal))
-      }.toSeq.reduce(_ ++ _)
-      CaseWhen(transformed)
+      val keyExpr = nodeToExpr(branches.head)
+      CaseKeyWhen(keyExpr, branches.drop(1).map(nodeToExpr))
 
     /* Complex datatype manipulation */
     case Token("[", child :: ordinal :: Nil) =>
