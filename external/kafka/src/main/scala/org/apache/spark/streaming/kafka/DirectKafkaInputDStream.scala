@@ -26,11 +26,10 @@ import kafka.message.MessageAndMetadata
 import kafka.serializer.Decoder
 
 import org.apache.spark.{Logging, SparkException}
-import org.apache.spark.streaming.kafka.KafkaCluster.LeaderOffset
 import org.apache.spark.streaming.{StreamingContext, Time}
 import org.apache.spark.streaming.dstream._
-import org.apache.spark.streaming.scheduler.{StreamingListenerBatchCompleted, StreamingListener}
-import org.apache.spark.streaming.scheduler.InputInfo
+import org.apache.spark.streaming.kafka.KafkaCluster.LeaderOffset
+import org.apache.spark.streaming.scheduler._
 
 /**
  *  A stream of {@link org.apache.spark.streaming.kafka.KafkaRDD} where
@@ -178,17 +177,18 @@ class DirectKafkaInputDStream[
     val offsetUpdateEnabled = context.conf.getBoolean("spark.streaming.kafka.offsetUpdate", false)
     val groupId = kafkaParams.getOrElse("group.id", "directKafkaConsumer")
 
-    override def onBatchCompleted(batchCompleted: StreamingListenerBatchCompleted) = synchronized {
-      if (offsetUpdateEnabled) {
-        for (offsets <- offsetMap.get(batchCompleted.batchInfo.batchTime)) {
-          val o = kc.setConsumerOffsets(groupId, offsets)
-          if (o.isLeft) {
-            logWarning(s"Error updating the offset to Kafka cluster: ${o.left.get}")
+    override def onBatchCompleted(batchCompleted: StreamingListenerBatchCompleted): Unit =
+      synchronized {
+        if (offsetUpdateEnabled) {
+          for (offsets <- offsetMap.get(batchCompleted.batchInfo.batchTime)) {
+            val o = kc.setConsumerOffsets(groupId, offsets)
+            if (o.isLeft) {
+              logWarning(s"Error updating the offset to Kafka cluster: ${o.left.get}")
+            }
           }
         }
-      }
 
-      offsetMap --= offsetMap.filter(_._1 <= batchCompleted.batchInfo.batchTime).keys
+        offsetMap --= offsetMap.filter(_._1 <= batchCompleted.batchInfo.batchTime).keys
     }
   }
 }
