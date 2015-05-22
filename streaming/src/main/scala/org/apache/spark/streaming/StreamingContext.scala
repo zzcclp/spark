@@ -42,7 +42,7 @@ import org.apache.spark.streaming.dstream._
 import org.apache.spark.streaming.receiver.{ActorReceiver, ActorSupervisorStrategy, Receiver}
 import org.apache.spark.streaming.scheduler.{JobScheduler, StreamingListener}
 import org.apache.spark.streaming.ui.{StreamingJobProgressListener, StreamingTab}
-import org.apache.spark.util.CallSite
+import org.apache.spark.util.{CallSite, Utils}
 
 /**
  * Main entry point for Spark Streaming functionality. It provides methods used to create
@@ -156,7 +156,7 @@ class StreamingContext private[streaming] (
       cp_.graph.restoreCheckpointData()
       cp_.graph
     } else {
-      assert(batchDur_ != null, "Batch duration for streaming context cannot be null")
+      require(batchDur_ != null, "Batch duration for StreamingContext cannot be null")
       val newGraph = new DStreamGraph()
       newGraph.setBatchDuration(batchDur_)
       newGraph
@@ -200,6 +200,8 @@ class StreamingContext private[streaming] (
   private var state: StreamingContextState = INITIALIZED
 
   private val startSite = new AtomicReference[CallSite](null)
+
+  private var shutdownHookRef: AnyRef = _
 
   /**
    * Return the associated Spark context
@@ -462,7 +464,8 @@ class StreamingContext private[streaming] (
       directory, FileInputDStream.defaultFilter : Path => Boolean, newFilesOnly=true, conf)
     val data = br.map { case (k, v) =>
       val bytes = v.getBytes
-      assert(bytes.length == recordLength, "Byte array does not have correct length")
+      require(bytes.length == recordLength, "Byte array does not have correct length. " +
+        s"${bytes.length} did not equal recordLength: $recordLength")
       bytes
     }
     data
@@ -568,7 +571,7 @@ class StreamingContext private[streaming] (
   /**
    * Start the execution of the streams.
    *
-   * @throws SparkException if the StreamingContext is already stopped.
+   * @throws IllegalStateException if the StreamingContext is already stopped.
    */
   def start(): Unit = synchronized {
     state match {
@@ -583,11 +586,13 @@ class StreamingContext private[streaming] (
           state = StreamingContextState.ACTIVE
           StreamingContext.setActiveContext(this)
         }
+        shutdownHookRef = Utils.addShutdownHook(
+          StreamingContext.SHUTDOWN_HOOK_PRIORITY)(stopOnShutdown)
         logInfo("StreamingContext started")
       case ACTIVE =>
         logWarning("StreamingContext has already been started")
       case STOPPED =>
-        throw new SparkException("StreamingContext has already been stopped")
+        throw new IllegalStateException("StreamingContext has already been stopped")
     }
   }
 
@@ -659,6 +664,9 @@ class StreamingContext private[streaming] (
           uiTab.foreach(_.detach())
           StreamingContext.setActiveContext(null)
           waiter.notifyStop()
+          if (shutdownHookRef != null) {
+            Utils.removeShutdownHook(shutdownHookRef)
+          }
           logInfo("StreamingContext stopped successfully")
       }
       // Even if we have already stopped, we still need to attempt to stop the SparkContext because
@@ -668,6 +676,13 @@ class StreamingContext private[streaming] (
       // The state should always be Stopped after calling `stop()`, even if we haven't started yet
       state = STOPPED
     }
+  }
+
+  private def stopOnShutdown(): Unit = {
+    val stopGracefully = conf.getBoolean("spark.streaming.stopGracefullyOnShutdown", false)
+    logInfo(s"Invoking stop(stopGracefully=$stopGracefully) from shutdown hook")
+    // Do not stop SparkContext, let its own shutdown hook stop it
+    stop(stopSparkContext = false, stopGracefully = stopGracefully)
   }
 }
 
@@ -684,12 +699,14 @@ object StreamingContext extends Logging {
    */
   private val ACTIVATION_LOCK = new Object()
 
+  private val SHUTDOWN_HOOK_PRIORITY = Utils.SPARK_CONTEXT_SHUTDOWN_PRIORITY + 1
+
   private val activeContext = new AtomicReference[StreamingContext](null)
 
   private def assertNoOtherContextIsActive(): Unit = {
     ACTIVATION_LOCK.synchronized {
       if (activeContext.get() != null) {
-        throw new SparkException(
+        throw new IllegalStateException(
           "Only one StreamingContext may be started in this JVM. " +
             "Currently running StreamingContext was started at" +
             activeContext.get.startSite.get.longForm)
