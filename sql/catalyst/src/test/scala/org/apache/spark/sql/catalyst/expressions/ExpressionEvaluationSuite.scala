@@ -28,6 +28,7 @@ import org.apache.spark.SparkFunSuite
 import org.apache.spark.sql.catalyst.CatalystTypeConverters
 import org.apache.spark.sql.catalyst.analysis.UnresolvedExtractValue
 import org.apache.spark.sql.catalyst.dsl.expressions._
+import org.apache.spark.sql.catalyst.expressions.codegen.{GenerateProjection, GenerateMutableProjection}
 import org.apache.spark.sql.catalyst.expressions.mathfuncs._
 import org.apache.spark.sql.catalyst.util.DateUtils
 import org.apache.spark.sql.types._
@@ -35,15 +36,86 @@ import org.apache.spark.sql.types._
 
 class ExpressionEvaluationBaseSuite extends SparkFunSuite {
 
+  def checkEvaluation(expression: Expression, expected: Any, inputRow: Row = EmptyRow): Unit = {
+    checkEvaluationWithoutCodegen(expression, expected, inputRow)
+    checkEvaluationWithGeneratedMutableProjection(expression, expected, inputRow)
+    checkEvaluationWithGeneratedProjection(expression, expected, inputRow)
+  }
+
   def evaluate(expression: Expression, inputRow: Row = EmptyRow): Any = {
     expression.eval(inputRow)
   }
 
-  def checkEvaluation(expression: Expression, expected: Any, inputRow: Row = EmptyRow): Unit = {
+  def checkEvaluationWithoutCodegen(
+      expression: Expression,
+      expected: Any,
+      inputRow: Row = EmptyRow): Unit = {
     val actual = try evaluate(expression, inputRow) catch {
       case e: Exception => fail(s"Exception evaluating $expression", e)
     }
     if (actual != expected) {
+      val input = if (inputRow == EmptyRow) "" else s", input: $inputRow"
+      fail(s"Incorrect Evaluation: $expression, actual: $actual, expected: $expected$input")
+    }
+  }
+
+  def checkEvaluationWithGeneratedMutableProjection(
+      expression: Expression,
+      expected: Any,
+      inputRow: Row = EmptyRow): Unit = {
+
+    val plan = try {
+      GenerateMutableProjection.generate(Alias(expression, s"Optimized($expression)")() :: Nil)()
+    } catch {
+      case e: Throwable =>
+        val ctx = GenerateProjection.newCodeGenContext()
+        val evaluated = expression.gen(ctx)
+        fail(
+          s"""
+            |Code generation of $expression failed:
+            |${evaluated.code}
+            |$e
+          """.stripMargin)
+    }
+
+    val actual = plan(inputRow).apply(0)
+    if (actual != expected) {
+      val input = if (inputRow == EmptyRow) "" else s", input: $inputRow"
+      fail(s"Incorrect Evaluation: $expression, actual: $actual, expected: $expected$input")
+    }
+  }
+
+  def checkEvaluationWithGeneratedProjection(
+      expression: Expression,
+      expected: Any,
+      inputRow: Row = EmptyRow): Unit = {
+    val ctx = GenerateProjection.newCodeGenContext()
+    lazy val evaluated = expression.gen(ctx)
+
+    val plan = try {
+      GenerateProjection.generate(Alias(expression, s"Optimized($expression)")() :: Nil)
+    } catch {
+      case e: Throwable =>
+        fail(
+          s"""
+            |Code generation of $expression failed:
+            |${evaluated.code}
+            |$e
+          """.stripMargin)
+    }
+
+    val actual = plan(inputRow)
+    val expectedRow = new GenericRow(Array[Any](CatalystTypeConverters.convertToCatalyst(expected)))
+    if (actual.hashCode() != expectedRow.hashCode()) {
+      fail(
+        s"""
+          |Mismatched hashCodes for values: $actual, $expectedRow
+          |Hash Codes: ${actual.hashCode()} != ${expectedRow.hashCode()}
+          |Expressions: ${expression}
+          |Code: ${evaluated}
+        """.stripMargin)
+    }
+    if (actual != expectedRow) {
       val input = if (inputRow == EmptyRow) "" else s", input: $inputRow"
       fail(s"Incorrect Evaluation: $expression, actual: $actual, expected: $expected$input")
     }
@@ -69,8 +141,16 @@ class ExpressionEvaluationSuite extends ExpressionEvaluationBaseSuite {
   test("literals") {
     checkEvaluation(Literal(1), 1)
     checkEvaluation(Literal(true), true)
+    checkEvaluation(Literal(false), false)
     checkEvaluation(Literal(0L), 0L)
+    List(0.0, -0.0, Double.NegativeInfinity, Double.PositiveInfinity).foreach {
+      d => {
+        checkEvaluation(Literal(d), d)
+        checkEvaluation(Literal(d.toFloat), d.toFloat)
+      }
+    }
     checkEvaluation(Literal("test"), "test")
+    checkEvaluation(Literal.create(null, StringType), null)
     checkEvaluation(Literal(1) + Literal(1), 2)
   }
 
@@ -344,7 +424,7 @@ class ExpressionEvaluationSuite extends ExpressionEvaluationBaseSuite {
     checkEvaluation("abdef" cast TimestampType, null)
     checkEvaluation("12.65" cast DecimalType.Unlimited, Decimal(12.65))
 
-    checkEvaluation(Literal(1) cast LongType, 1)
+    checkEvaluation(Literal(1) cast LongType, 1.toLong)
     checkEvaluation(Cast(Literal(1000) cast TimestampType, LongType), 1.toLong)
     checkEvaluation(Cast(Literal(-1200) cast TimestampType, LongType), -2.toLong)
     checkEvaluation(Cast(Literal(1.toDouble) cast TimestampType, DoubleType), 1.toDouble)
@@ -363,13 +443,16 @@ class ExpressionEvaluationSuite extends ExpressionEvaluationBaseSuite {
     checkEvaluation(Cast("abdef" cast BinaryType, StringType), "abdef")
 
     checkEvaluation(Cast(Cast(Cast(Cast(
-      Cast("5" cast ByteType, ShortType), IntegerType), FloatType), DoubleType), LongType), 5)
+      Cast("5" cast ByteType, ShortType), IntegerType), FloatType), DoubleType), LongType),
+      5.toLong)
     checkEvaluation(Cast(Cast(Cast(Cast(Cast("5" cast
-      ByteType, TimestampType), DecimalType.Unlimited), LongType), StringType), ShortType), 0)
+      ByteType, TimestampType), DecimalType.Unlimited), LongType), StringType), ShortType),
+      0.toShort)
     checkEvaluation(Cast(Cast(Cast(Cast(Cast("5" cast
       TimestampType, ByteType), DecimalType.Unlimited), LongType), StringType), ShortType), null)
     checkEvaluation(Cast(Cast(Cast(Cast(Cast("5" cast
-      DecimalType.Unlimited, ByteType), TimestampType), LongType), StringType), ShortType), 0)
+      DecimalType.Unlimited, ByteType), TimestampType), LongType), StringType), ShortType),
+      0.toShort)
     checkEvaluation(Literal(true) cast IntegerType, 1)
     checkEvaluation(Literal(false) cast IntegerType, 0)
     checkEvaluation(Literal(true) cast StringType, "true")
@@ -509,9 +592,9 @@ class ExpressionEvaluationSuite extends ExpressionEvaluationBaseSuite {
     val seconds = millis * 1000 + 2
     val ts = new Timestamp(millis)
     val tss = new Timestamp(seconds)
-    checkEvaluation(Cast(ts, ShortType), 15)
+    checkEvaluation(Cast(ts, ShortType), 15.toShort)
     checkEvaluation(Cast(ts, IntegerType), 15)
-    checkEvaluation(Cast(ts, LongType), 15)
+    checkEvaluation(Cast(ts, LongType), 15.toLong)
     checkEvaluation(Cast(ts, FloatType), 15.002f)
     checkEvaluation(Cast(ts, DoubleType), 15.002)
     checkEvaluation(Cast(Cast(tss, ShortType), TimestampType), ts)
@@ -1363,6 +1446,11 @@ class ExpressionEvaluationSuite extends ExpressionEvaluationBaseSuite {
 
 // TODO: Make the tests work with codegen.
 class ExpressionEvaluationWithoutCodeGenSuite extends ExpressionEvaluationBaseSuite {
+
+  override def checkEvaluation(
+      expression: Expression, expected: Any, inputRow: Row = EmptyRow): Unit = {
+    checkEvaluationWithoutCodegen(expression, expected, inputRow)
+  }
 
   test("CreateStruct") {
     val row = Row(1, 2, 3)
