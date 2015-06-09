@@ -21,7 +21,7 @@ import java.sql.{Date, Timestamp}
 import java.text.{DateFormat, SimpleDateFormat}
 
 import org.apache.spark.Logging
-import org.apache.spark.sql.catalyst.expressions.codegen.{GeneratedExpressionCode, Code, CodeGenContext}
+import org.apache.spark.sql.catalyst.expressions.codegen.{CodeGenContext, GeneratedExpressionCode}
 import org.apache.spark.sql.catalyst.util.DateUtils
 import org.apache.spark.sql.types._
 
@@ -161,7 +161,7 @@ case class Cast(child: Expression, dataType: DataType) extends UnaryExpression w
         try Timestamp.valueOf(n) catch { case _: java.lang.IllegalArgumentException => null }
       })
     case BooleanType =>
-      buildCast[Boolean](_, b => new Timestamp((if (b) 1 else 0)))
+      buildCast[Boolean](_, b => new Timestamp(if (b) 1 else 0))
     case LongType =>
       buildCast[Long](_, l => new Timestamp(l))
     case IntegerType =>
@@ -435,7 +435,7 @@ case class Cast(child: Expression, dataType: DataType) extends UnaryExpression w
     if (evaluated == null) null else cast(evaluated)
   }
 
-  override def genCode(ctx: CodeGenContext, ev: GeneratedExpressionCode): Code = {
+  override def genCode(ctx: CodeGenContext, ev: GeneratedExpressionCode): String = {
     // TODO(cg): Add support for more data types.
     (child.dataType, dataType) match {
 

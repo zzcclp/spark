@@ -18,7 +18,7 @@
 package org.apache.spark.sql.catalyst.expressions
 
 import org.apache.spark.sql.catalyst.analysis.TypeCheckResult
-import org.apache.spark.sql.catalyst.expressions.codegen.{Code, GeneratedExpressionCode, CodeGenContext}
+import org.apache.spark.sql.catalyst.expressions.codegen.{GeneratedExpressionCode, CodeGenContext}
 import org.apache.spark.sql.catalyst.util.TypeUtils
 import org.apache.spark.sql.types._
 
@@ -50,7 +50,7 @@ case class UnaryMinus(child: Expression) extends UnaryArithmetic {
 
   private lazy val numeric = TypeUtils.getNumeric(dataType)
 
-  override def genCode(ctx: CodeGenContext, ev: GeneratedExpressionCode): Code = dataType match {
+  override def genCode(ctx: CodeGenContext, ev: GeneratedExpressionCode): String = dataType match {
     case dt: DecimalType => defineCodeGen(ctx, ev, c => s"c.unary_$$minus()")
     case dt: NumericType => defineCodeGen(ctx, ev, c => s"-($c)")
   }
@@ -74,7 +74,7 @@ case class Sqrt(child: Expression) extends UnaryArithmetic {
     else math.sqrt(value)
   }
 
-  override def genCode(ctx: CodeGenContext, ev: GeneratedExpressionCode): Code = {
+  override def genCode(ctx: CodeGenContext, ev: GeneratedExpressionCode): String = {
     val eval = child.gen(ctx)
     eval.code + s"""
       boolean ${ev.isNull} = ${eval.isNull};
@@ -138,7 +138,7 @@ abstract class BinaryArithmetic extends BinaryExpression {
     }
   }
 
-  override def genCode(ctx: CodeGenContext, ev: GeneratedExpressionCode): Code = dataType match {
+  override def genCode(ctx: CodeGenContext, ev: GeneratedExpressionCode): String = dataType match {
     case dt: DecimalType =>
       defineCodeGen(ctx, ev, (eval1, eval2) => s"$eval1.$decimalMethod($eval2)")
     // byte and short are casted into int when add, minus, times or divide
@@ -236,7 +236,7 @@ case class Divide(left: Expression, right: Expression) extends BinaryArithmetic 
   /**
    * Special case handling due to division by 0 => null.
    */
-  override def genCode(ctx: CodeGenContext, ev: GeneratedExpressionCode): Code = {
+  override def genCode(ctx: CodeGenContext, ev: GeneratedExpressionCode): String = {
     val eval1 = left.gen(ctx)
     val eval2 = right.gen(ctx)
     val test = if (left.dataType.isInstanceOf[DecimalType]) {
@@ -296,7 +296,7 @@ case class Remainder(left: Expression, right: Expression) extends BinaryArithmet
   /**
    * Special case handling for x % 0 ==> null.
    */
-  override def genCode(ctx: CodeGenContext, ev: GeneratedExpressionCode): Code = {
+  override def genCode(ctx: CodeGenContext, ev: GeneratedExpressionCode): String = {
     val eval1 = left.gen(ctx)
     val eval2 = right.gen(ctx)
     val test = if (left.dataType.isInstanceOf[DecimalType]) {
@@ -320,102 +320,6 @@ case class Remainder(left: Expression, right: Expression) extends BinaryArithmet
       }
       """
   }
-}
-
-/**
- * A function that calculates bitwise and(&) of two numbers.
- */
-case class BitwiseAnd(left: Expression, right: Expression) extends BinaryArithmetic {
-  override def symbol: String = "&"
-
-  protected def checkTypesInternal(t: DataType) =
-    TypeUtils.checkForBitwiseExpr(t, "operator " + symbol)
-
-  private lazy val and: (Any, Any) => Any = dataType match {
-    case ByteType =>
-      ((evalE1: Byte, evalE2: Byte) => (evalE1 & evalE2).toByte).asInstanceOf[(Any, Any) => Any]
-    case ShortType =>
-      ((evalE1: Short, evalE2: Short) => (evalE1 & evalE2).toShort).asInstanceOf[(Any, Any) => Any]
-    case IntegerType =>
-      ((evalE1: Int, evalE2: Int) => evalE1 & evalE2).asInstanceOf[(Any, Any) => Any]
-    case LongType =>
-      ((evalE1: Long, evalE2: Long) => evalE1 & evalE2).asInstanceOf[(Any, Any) => Any]
-  }
-
-  protected override def evalInternal(evalE1: Any, evalE2: Any) = and(evalE1, evalE2)
-}
-
-/**
- * A function that calculates bitwise or(|) of two numbers.
- */
-case class BitwiseOr(left: Expression, right: Expression) extends BinaryArithmetic {
-  override def symbol: String = "|"
-
-  protected def checkTypesInternal(t: DataType) =
-    TypeUtils.checkForBitwiseExpr(t, "operator " + symbol)
-
-  private lazy val or: (Any, Any) => Any = dataType match {
-    case ByteType =>
-      ((evalE1: Byte, evalE2: Byte) => (evalE1 | evalE2).toByte).asInstanceOf[(Any, Any) => Any]
-    case ShortType =>
-      ((evalE1: Short, evalE2: Short) => (evalE1 | evalE2).toShort).asInstanceOf[(Any, Any) => Any]
-    case IntegerType =>
-      ((evalE1: Int, evalE2: Int) => evalE1 | evalE2).asInstanceOf[(Any, Any) => Any]
-    case LongType =>
-      ((evalE1: Long, evalE2: Long) => evalE1 | evalE2).asInstanceOf[(Any, Any) => Any]
-  }
-
-  protected override def evalInternal(evalE1: Any, evalE2: Any) = or(evalE1, evalE2)
-}
-
-/**
- * A function that calculates bitwise xor of two numbers.
- */
-case class BitwiseXor(left: Expression, right: Expression) extends BinaryArithmetic {
-  override def symbol: String = "^"
-
-  protected def checkTypesInternal(t: DataType) =
-    TypeUtils.checkForBitwiseExpr(t, "operator " + symbol)
-
-  private lazy val xor: (Any, Any) => Any = dataType match {
-    case ByteType =>
-      ((evalE1: Byte, evalE2: Byte) => (evalE1 ^ evalE2).toByte).asInstanceOf[(Any, Any) => Any]
-    case ShortType =>
-      ((evalE1: Short, evalE2: Short) => (evalE1 ^ evalE2).toShort).asInstanceOf[(Any, Any) => Any]
-    case IntegerType =>
-      ((evalE1: Int, evalE2: Int) => evalE1 ^ evalE2).asInstanceOf[(Any, Any) => Any]
-    case LongType =>
-      ((evalE1: Long, evalE2: Long) => evalE1 ^ evalE2).asInstanceOf[(Any, Any) => Any]
-  }
-
-  protected override def evalInternal(evalE1: Any, evalE2: Any): Any = xor(evalE1, evalE2)
-}
-
-/**
- * A function that calculates bitwise not(~) of a number.
- */
-case class BitwiseNot(child: Expression) extends UnaryArithmetic {
-  override def toString: String = s"~$child"
-
-  override def checkInputDataTypes(): TypeCheckResult =
-    TypeUtils.checkForBitwiseExpr(child.dataType, "operator ~")
-
-  private lazy val not: (Any) => Any = dataType match {
-    case ByteType =>
-      ((evalE: Byte) => (~evalE).toByte).asInstanceOf[(Any) => Any]
-    case ShortType =>
-      ((evalE: Short) => (~evalE).toShort).asInstanceOf[(Any) => Any]
-    case IntegerType =>
-      ((evalE: Int) => ~evalE).asInstanceOf[(Any) => Any]
-    case LongType =>
-      ((evalE: Long) => ~evalE).asInstanceOf[(Any) => Any]
-  }
-
-  override def genCode(ctx: CodeGenContext, ev: GeneratedExpressionCode): Code = {
-    defineCodeGen(ctx, ev, c => s"(${ctx.javaType(dataType)})~($c)")
-  }
-
-  protected override def evalInternal(evalE: Any) = not(evalE)
 }
 
 case class MaxOf(left: Expression, right: Expression) extends BinaryArithmetic {
@@ -442,7 +346,7 @@ case class MaxOf(left: Expression, right: Expression) extends BinaryArithmetic {
     }
   }
 
-  override def genCode(ctx: CodeGenContext, ev: GeneratedExpressionCode): Code = {
+  override def genCode(ctx: CodeGenContext, ev: GeneratedExpressionCode): String = {
     if (ctx.isNativeType(left.dataType)) {
       val eval1 = left.gen(ctx)
       val eval2 = right.gen(ctx)
@@ -496,7 +400,7 @@ case class MinOf(left: Expression, right: Expression) extends BinaryArithmetic {
     }
   }
 
-  override def genCode(ctx: CodeGenContext, ev: GeneratedExpressionCode): Code = {
+  override def genCode(ctx: CodeGenContext, ev: GeneratedExpressionCode): String = {
     if (ctx.isNativeType(left.dataType)) {
 
       val eval1 = left.gen(ctx)
