@@ -25,10 +25,10 @@ import org.apache.spark.sql.types._
 
 
 /**
- * For Catalyst to work correctly, concrete implementations of [[Expression]]s must be case classes
- * whose constructor arguments are all Expressions types. In addition, if we want to support more
- * than one constructor, define those constructors explicitly as apply methods in the companion
- * object.
+ * If an expression wants to be exposed in the function registry (so users can call it with
+ * "name(arguments...)", the concrete implementation must be a case class whose constructor
+ * arguments are all Expressions types. In addition, if it needs to support more than one
+ * constructor, define those constructors explicitly as apply methods in the companion object.
  *
  * See [[Substring]] for an example.
  */
@@ -212,6 +212,9 @@ abstract class LeafExpression extends Expression with trees.LeafNode[Expression]
 abstract class UnaryExpression extends Expression with trees.UnaryNode[Expression] {
   self: Product =>
 
+  override def foldable: Boolean = child.foldable
+  override def nullable: Boolean = child.nullable
+
   /**
    * Called by unary expressions to generate a code block that returns null if its parent returns
    * null, and if not not null, use `f` to generate the expression.
@@ -237,18 +240,6 @@ abstract class UnaryExpression extends Expression with trees.UnaryNode[Expressio
       }
     """
   }
-}
-
-// TODO Semantically we probably not need GroupExpression
-// All we need is holding the Seq[Expression], and ONLY used in doing the
-// expressions transformation correctly. Probably will be removed since it's
-// not like a real expressions.
-case class GroupExpression(children: Seq[Expression]) extends Expression {
-  self: Product =>
-  override def eval(input: Row): Any = throw new UnsupportedOperationException
-  override def nullable: Boolean = false
-  override def foldable: Boolean = false
-  override def dataType: DataType = throw new UnsupportedOperationException
 }
 
 /**
