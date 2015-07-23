@@ -18,6 +18,7 @@
 package org.apache.spark.unsafe.types;
 
 import java.io.UnsupportedEncodingException;
+import java.util.Arrays;
 
 import org.junit.Test;
 
@@ -269,6 +270,35 @@ public class UTF8StringSuite {
     assertEquals(
       fromString("数据砖头孙行者孙行者孙行"),
       fromString("数据砖头").rpad(12, fromString("孙行者")));
+  }
+
+  @Test
+  public void substringSQL() {
+    UTF8String e = fromString("example");
+    assertEquals(e.substringSQL(0, 2), fromString("ex"));
+    assertEquals(e.substringSQL(1, 2), fromString("ex"));
+    assertEquals(e.substringSQL(0, 7), fromString("example"));
+    assertEquals(e.substringSQL(1, 2), fromString("ex"));
+    assertEquals(e.substringSQL(0, 100), fromString("example"));
+    assertEquals(e.substringSQL(1, 100), fromString("example"));
+    assertEquals(e.substringSQL(2, 2), fromString("xa"));
+    assertEquals(e.substringSQL(1, 6), fromString("exampl"));
+    assertEquals(e.substringSQL(2, 100), fromString("xample"));
+    assertEquals(e.substringSQL(0, 0), fromString(""));
+    assertEquals(e.substringSQL(100, 4), EMPTY_UTF8);
+    assertEquals(e.substringSQL(0, Integer.MAX_VALUE), fromString("example"));
+    assertEquals(e.substringSQL(1, Integer.MAX_VALUE), fromString("example"));
+    assertEquals(e.substringSQL(2, Integer.MAX_VALUE), fromString("xample"));
+  }
+
+  @Test
+  public void split() {
+    assertTrue(Arrays.equals(fromString("ab,def,ghi").split(fromString(","), -1),
+      new UTF8String[]{fromString("ab"), fromString("def"), fromString("ghi")}));
+    assertTrue(Arrays.equals(fromString("ab,def,ghi").split(fromString(","), 2),
+      new UTF8String[]{fromString("ab"), fromString("def,ghi")}));
+    assertTrue(Arrays.equals(fromString("ab,def,ghi").split(fromString(","), 2),
+      new UTF8String[]{fromString("ab"), fromString("def,ghi")}));
   }
   
   @Test
