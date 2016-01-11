@@ -25,6 +25,8 @@ import org.apache.spark.rdd.RDD
 import org.apache.spark.storage.StorageLevel
 import org.apache.spark.streaming.{Duration, Time}
 
+import scala.reflect.ClassTag
+
 private[streaming]
 class StateDStream[K: ClassTag, V: ClassTag, S: ClassTag](
     parent: DStream[(K, V)],
@@ -32,7 +34,7 @@ class StateDStream[K: ClassTag, V: ClassTag, S: ClassTag](
     partitioner: Partitioner,
     preservePartitioning: Boolean,
     initialRDD : Option[RDD[(K, S)]]
-  ) extends DStream[(K, S)](parent.ssc) {
+  ) extends DumpableDStream[K, S](parent.ssc) {
 
   super.persist(StorageLevel.MEMORY_ONLY_SER)
 
