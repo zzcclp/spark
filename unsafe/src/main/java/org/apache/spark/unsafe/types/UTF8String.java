@@ -18,6 +18,7 @@
 package org.apache.spark.unsafe.types;
 
 import javax.annotation.Nonnull;
+
 import java.io.*;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
@@ -31,6 +32,8 @@ import com.esotericsoftware.kryo.io.Output;
 
 import org.apache.spark.unsafe.Platform;
 import org.apache.spark.unsafe.array.ByteArrayMethods;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import static org.apache.spark.unsafe.Platform.*;
 
@@ -44,6 +47,8 @@ import static org.apache.spark.unsafe.Platform.*;
  * Note: This is not designed for general use cases, should not be used outside SQL.
  */
 public final class UTF8String implements Comparable<UTF8String>, Externalizable, KryoSerializable {
+
+  private static final Logger logger = LoggerFactory.getLogger(UTF8String.class);
 
   // These are only updated by readExternal() or read()
   @Nonnull
@@ -158,6 +163,10 @@ public final class UTF8String implements Comparable<UTF8String>, Externalizable,
    */
   private static int numBytesForFirstByte(final byte b) {
     final int offset = (b & 0xFF) - 192;
+    if (offset > 61){
+        logger.warn("UTF8String.numBytesForFirstByte offset{} exceed bytesOfCodePointInUTF8.length=62, will return 1", offset);
+        return 1;
+    }
     return (offset >= 0) ? bytesOfCodePointInUTF8[offset] : 1;
   }
 
