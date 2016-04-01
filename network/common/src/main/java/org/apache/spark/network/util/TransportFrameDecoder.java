@@ -17,7 +17,6 @@
 
 package org.apache.spark.network.util;
 
-import java.util.Iterator;
 import java.util.LinkedList;
 
 import com.google.common.base.Preconditions;
@@ -141,7 +140,7 @@ public class TransportFrameDecoder extends ChannelInboundHandlerAdapter {
     }
 
     // Otherwise, create a composite buffer.
-    CompositeByteBuf frame = buffers.getFirst().alloc().compositeBuffer();
+    CompositeByteBuf frame = buffers.getFirst().alloc().compositeBuffer(Integer.MAX_VALUE);
     while (remaining > 0) {
       ByteBuf next = nextBufferForFrame(remaining);
       remaining -= next.readableBytes();
