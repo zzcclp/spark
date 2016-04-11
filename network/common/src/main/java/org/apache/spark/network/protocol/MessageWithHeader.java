@@ -43,7 +43,7 @@ class MessageWithHeader extends AbstractReferenceCounted implements FileRegion {
   /**
    * When the write buffer size is larger than this limit, I/O will be done in chunks of this size.
    * The size should not be too large as it will waste underlying memory copy. e.g. If network
-   * avaliable buffer is smaller than this limit, the data cannot be sent within one single write
+   * available buffer is smaller than this limit, the data cannot be sent within one single write
    * operation while it still will make memory copy with this size.
    */
   private static final int NIO_BUFFER_LIMIT = 256 * 1024;
