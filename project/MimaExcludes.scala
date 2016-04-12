@@ -162,6 +162,9 @@ object MimaExcludes {
         // SPARK-13465 TaskContext.
         ProblemFilters.exclude[MissingMethodProblem]("org.apache.spark.TaskContext.addTaskFailureListener")
       ) ++ Seq(
+        // [SPARK-14437][Core] Use the address that NettyBlockTransferService listens to create BlockManagerId
+        // ProblemFilters.exclude[DirectMissingMethodProblem]("org.apache.spark.network.netty.NettyBlockTransferService.this")
+        // ) ++ Seq(
         // SPARK-12591 Register OpenHashMapBasedStateMap for Kryo
         ProblemFilters.exclude[MissingClassProblem]("org.apache.spark.serializer.KryoInputDataInputBridge"),
         ProblemFilters.exclude[MissingClassProblem]("org.apache.spark.serializer.KryoOutputDataOutputBridge")

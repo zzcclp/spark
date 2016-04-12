@@ -67,7 +67,7 @@ class BlockManagerSuite extends SparkFunSuite with Matchers with BeforeAndAfterE
   private def makeBlockManager(
       maxMem: Long,
       name: String = SparkContext.DRIVER_IDENTIFIER): BlockManager = {
-    val transfer = new NettyBlockTransferService(conf, securityMgr, numCores = 1)
+    val transfer = new NettyBlockTransferService(conf, securityMgr, "localhost", numCores = 1)
     val memManager = new StaticMemoryManager(conf, Long.MaxValue, maxMem, numCores = 1)
     val blockManager = new BlockManager(name, rpcEnv, master, serializer, conf,
       memManager, mapOutputTracker, shuffleManager, transfer, securityMgr, 0)
@@ -848,7 +848,7 @@ class BlockManagerSuite extends SparkFunSuite with Matchers with BeforeAndAfterE
 
   test("block store put failure") {
     // Use Java serializer so we can create an unserializable error.
-    val transfer = new NettyBlockTransferService(conf, securityMgr, numCores = 1)
+    val transfer = new NettyBlockTransferService(conf, securityMgr, "localhost", numCores = 1)
     val memoryManager = new StaticMemoryManager(
       conf,
       maxOnHeapExecutionMemory = Long.MaxValue,

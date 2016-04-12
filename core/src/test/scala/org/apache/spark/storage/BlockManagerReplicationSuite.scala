@@ -60,7 +60,7 @@ class BlockManagerReplicationSuite extends SparkFunSuite with Matchers with Befo
   private def makeBlockManager(
       maxMem: Long,
       name: String = SparkContext.DRIVER_IDENTIFIER): BlockManager = {
-    val transfer = new NettyBlockTransferService(conf, securityMgr, numCores = 1)
+    val transfer = new NettyBlockTransferService(conf, securityMgr, "localhost", numCores = 1)
     val memManager = new StaticMemoryManager(conf, Long.MaxValue, maxMem, numCores = 1)
     val store = new BlockManager(name, rpcEnv, master, serializer, conf,
       memManager, mapOutputTracker, shuffleManager, transfer, securityMgr, 0)
