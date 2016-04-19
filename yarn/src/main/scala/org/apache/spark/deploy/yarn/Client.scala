@@ -347,6 +347,10 @@ private[spark] class Client(
     // multiple times, YARN will fail to launch containers for the app with an internal
     // error.
     val distributedUris = new HashSet[String]
+    // Used to keep track of URIs(files) added to the distribute cache have the same name. If
+    // same name but different path files are added multiple time, YARN will fail to launch
+    // containers for the app with an internal error.
+    val distributedNames = new HashSet[String]
     obtainTokenForHiveMetastore(sparkConf, hadoopConf, credentials)
     obtainTokenForHBase(sparkConf, hadoopConf, credentials)
 
@@ -367,11 +371,16 @@ private[spark] class Client(
 
     def addDistributedUri(uri: URI): Boolean = {
       val uriStr = uri.toString()
+      val fileName = new File(uri.getPath).getName
       if (distributedUris.contains(uriStr)) {
-        logWarning(s"Resource $uri added multiple times to distributed cache.")
+        logWarning(s"Same path resource $uri added multiple times to distributed cache.")
+        false
+      } else if (distributedNames.contains(fileName)) {
+        logWarning(s"Same name resource $uri added multiple times to distributed cache")
         false
       } else {
         distributedUris += uriStr
+        distributedNames += fileName
         true
       }
     }
@@ -469,8 +478,7 @@ private[spark] class Client(
       if (flist != null && !flist.isEmpty()) {
         flist.split(',').foreach { file =>
           val (_, localizedPath) = distribute(file, resType = resType)
-          require(localizedPath != null)
-          if (addToClasspath) {
+          if (addToClasspath && localizedPath != null) {
             cachedSecondaryJarLinks += localizedPath
           }
         }
