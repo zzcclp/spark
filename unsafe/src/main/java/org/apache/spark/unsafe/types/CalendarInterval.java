@@ -62,7 +62,7 @@ public final class CalendarInterval implements Serializable {
     if (s == null) {
       return 0;
     } else {
-      return Long.valueOf(s);
+      return Long.parseLong(s);
     }
   }
 
@@ -91,7 +91,7 @@ public final class CalendarInterval implements Serializable {
       String s, long minValue, long maxValue) throws IllegalArgumentException {
     long result = 0;
     if (s != null) {
-      result = Long.valueOf(s);
+      result = Long.parseLong(s);
       if (result < minValue || result > maxValue) {
         throw new IllegalArgumentException(String.format("%s %d outside range [%d, %d]",
           fieldName, result, minValue, maxValue));
@@ -304,7 +304,7 @@ public final class CalendarInterval implements Serializable {
 
   private void appendUnit(StringBuilder sb, long value, String unit) {
     if (value != 0) {
-      sb.append(" " + value + " " + unit + "s");
+      sb.append(' ').append(value).append(' ').append(unit).append('s');
     }
   }
 }
