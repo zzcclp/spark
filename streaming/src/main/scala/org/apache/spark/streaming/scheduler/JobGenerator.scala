@@ -209,14 +209,13 @@ class JobGenerator(jobScheduler: JobScheduler) extends Logging {
 
     // Batches when the master was down, that is,
     // between the checkpoint and current restart time
-    val checkpointTime = {
+    val checkpointTime = if (ssc.initialCheckpoint.afterBatchCompletion) {
       // if checkpoint after batch completion, start from next batch
-      if (ssc.initialCheckpoint.afterBatchCompletion) {
-        ssc.initialCheckpoint.checkpointTime + batchDuration
-      } else {
-        ssc.initialCheckpoint.checkpointTime
-      }
+      ssc.initialCheckpoint.checkpointTime + batchDuration
+    } else {
+      ssc.initialCheckpoint.checkpointTime
     }
+
     val restartTime = new Time(timer.getRestartTime(graph.zeroTime.milliseconds))
     val downTimes = checkpointTime.until(restartTime, batchDuration)
     logInfo("Batches during down time (" + downTimes.size + " batches): "
@@ -299,7 +298,8 @@ class JobGenerator(jobScheduler: JobScheduler) extends Logging {
     if (shouldCheckpoint && (time - graph.zeroTime).isMultipleOf(ssc.checkpointDuration)) {
       logInfo("Checkpointing graph for time " + time)
       ssc.graph.updateCheckpointData(time)
-      checkpointWriter.write(new Checkpoint(ssc, time, clearCheckpointDataLater), clearCheckpointDataLater)
+      val afterBatchCompletion = clearCheckpointDataLater
+      checkpointWriter.write(new Checkpoint(ssc, time, afterBatchCompletion), clearCheckpointDataLater)
     }
   }
 
