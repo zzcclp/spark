@@ -48,13 +48,13 @@ class DiskBlockObjectWriterSuite extends SparkFunSuite with BeforeAndAfterEach {
     assert(writeMetrics.shuffleRecordsWritten === 1)
     // Metrics don't update on every write
     assert(writeMetrics.shuffleBytesWritten == 0)
-    // After 32 writes, metrics should update
-    for (i <- 0 until 32) {
+    // After 16384 writes, metrics should update
+    for (i <- 0 until 16384) {
       writer.flush()
       writer.write(Long.box(i), Long.box(i))
     }
     assert(writeMetrics.shuffleBytesWritten > 0)
-    assert(writeMetrics.shuffleRecordsWritten === 33)
+    assert(writeMetrics.shuffleRecordsWritten === 16385)
     writer.commitAndClose()
     assert(file.length() == writeMetrics.shuffleBytesWritten)
   }
@@ -70,13 +70,13 @@ class DiskBlockObjectWriterSuite extends SparkFunSuite with BeforeAndAfterEach {
     assert(writeMetrics.shuffleRecordsWritten === 1)
     // Metrics don't update on every write
     assert(writeMetrics.shuffleBytesWritten == 0)
-    // After 32 writes, metrics should update
-    for (i <- 0 until 32) {
+    // After 16384 writes, metrics should update
+    for (i <- 0 until 16384) {
       writer.flush()
       writer.write(Long.box(i), Long.box(i))
     }
     assert(writeMetrics.shuffleBytesWritten > 0)
-    assert(writeMetrics.shuffleRecordsWritten === 33)
+    assert(writeMetrics.shuffleRecordsWritten === 16385)
     writer.revertPartialWritesAndClose()
     assert(writeMetrics.shuffleBytesWritten == 0)
     assert(writeMetrics.shuffleRecordsWritten == 0)
