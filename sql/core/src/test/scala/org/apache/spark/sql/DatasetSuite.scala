@@ -553,6 +553,14 @@ class DatasetSuite extends QueryTest with SharedSQLContext {
     checkAnswer(ds1, DeepNestedStruct(NestedStruct(null)))
     checkAnswer(ds1.toDF(), Row(Row(null)))
   }
+
+  test("better error message when use java reserved keyword as field name") {
+    val e = intercept[UnsupportedOperationException] {
+      Seq(InvalidInJava(1)).toDS()
+    }
+    assert(e.getMessage.contains(
+      "`abstract` is a reserved keyword and cannot be used as field name"))
+  }
 }
 
 case class ClassData(a: String, b: Int)
@@ -561,6 +569,8 @@ case class ClassNullableData(a: String, b: Integer)
 
 case class NestedStruct(f: ClassData)
 case class DeepNestedStruct(f: NestedStruct)
+
+case class InvalidInJava(`abstract`: Int)
 
 /**
  * A class used to test serialization using encoders. This class throws exceptions when using
