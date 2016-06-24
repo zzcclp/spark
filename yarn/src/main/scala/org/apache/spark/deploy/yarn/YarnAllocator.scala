@@ -302,7 +302,7 @@ private[yarn] class YarnAllocator(
         val hostStr = if (nodes == null || nodes.isEmpty) "Any" else nodes.asScala.last
         logInfo(s"Container request (host: $hostStr, capability: $resource)")
       }
-    } else if (missing < 0) {
+    } else if (numPendingAllocate > 0 && missing < 0) {
       val numToCancel = math.min(numPendingAllocate, -missing)
       logInfo(s"Canceling requests for $numToCancel executor containers")
 
