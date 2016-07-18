@@ -42,8 +42,7 @@ private[spark] class CoarseGrainedExecutorBackend(
     hostPort: String,
     cores: Int,
     userClassPath: Seq[URL],
-    env: SparkEnv,
-    hostname: String)
+    env: SparkEnv)
   extends ThreadSafeRpcEndpoint with ExecutorBackend with Logging {
 
   var executor: Executor = null
@@ -54,7 +53,6 @@ private[spark] class CoarseGrainedExecutorBackend(
   private[this] val ser: SerializerInstance = env.closureSerializer.newInstance()
 
   override def onStart() {
-    executor = new Executor(executorId, hostname, env, userClassPath, isLocal = false)
     logInfo("Connecting to driver: " + driverUrl)
     rpcEnv.asyncSetupEndpointRefByURI(driverUrl).flatMap { ref =>
       // This is a very fast action so we can use "ThreadUtils.sameThread"
@@ -81,6 +79,7 @@ private[spark] class CoarseGrainedExecutorBackend(
   override def receive: PartialFunction[Any, Unit] = {
     case RegisteredExecutor(hostname) =>
       logInfo("Successfully registered with driver")
+      executor = new Executor(executorId, hostname, env, userClassPath, isLocal = false)
 
     case RegisterExecutorFailed(message) =>
       logError("Slave registration failed: " + message)
@@ -200,7 +199,7 @@ private[spark] object CoarseGrainedExecutorBackend extends Logging {
           hostname + ":" + port
         }.orNull
       env.rpcEnv.setupEndpoint("Executor", new CoarseGrainedExecutorBackend(
-        env.rpcEnv, driverUrl, executorId, sparkHostPort, cores, userClassPath, env, hostname))
+        env.rpcEnv, driverUrl, executorId, sparkHostPort, cores, userClassPath, env))
       workerUrl.foreach { url =>
         env.rpcEnv.setupEndpoint("WorkerWatcher", new WorkerWatcher(env.rpcEnv, url))
       }
