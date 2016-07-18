@@ -111,9 +111,17 @@ private[spark] class CoarseGrainedExecutorBackend(
       self.send(Shutdown)
 
     case Shutdown =>
-      executor.stop()
-      stop()
-      rpcEnv.shutdown()
+      new Thread("CoarseGrainedExecutorBackend-stop-executor") {
+        override def run(): Unit = {
+          // executor.stop() will call `SparkEnv.stop()` which waits until RpcEnv stops totally.
+          // However, if `executor.stop()` runs in some thread of RpcEnv, RpcEnv won't be able to
+          // stop until `executor.stop()` returns, which becomes a dead-lock (See SPARK-14180).
+          // Therefore, we put this line in a new thread.
+          // rpcEnv.shutdown() will be called in executor.stop(), and endpoint.stop() will be
+          // called by rpcEnv.shutdown(), so we don't need these two lines.
+          executor.stop()
+        }
+      }.start()
   }
 
   override def onDisconnected(remoteAddress: RpcAddress): Unit = {
