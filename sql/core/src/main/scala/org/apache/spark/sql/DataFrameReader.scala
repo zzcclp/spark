@@ -163,7 +163,8 @@ class DataFrameReader private[sql](sqlContext: SQLContext) extends Logging {
    *                      evenly into this many partitions
    * @param connectionProperties JDBC database connection arguments, a list of arbitrary string
    *                             tag/value. Normally at least a "user" and "password" property
-   *                             should be included.
+   *                             should be included. "fetchsize" can be used to control the
+   *                             number of rows per fetch.
    *
    * @since 1.4.0
    */
@@ -194,7 +195,8 @@ class DataFrameReader private[sql](sqlContext: SQLContext) extends Logging {
    * @param predicates Condition in the where clause for each partition.
    * @param connectionProperties JDBC database connection arguments, a list of arbitrary string
    *                             tag/value. Normally at least a "user" and "password" property
-   *                             should be included.
+   *                             should be included. "fetchsize" can be used to control the
+   *                             number of rows per fetch.
    * @since 1.4.0
    */
   def jdbc(
