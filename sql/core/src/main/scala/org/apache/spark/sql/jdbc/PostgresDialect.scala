@@ -88,4 +88,6 @@ private object PostgresDialect extends JdbcDialect {
     }
 
   }
+
+  override def isCascadingTruncateTable(): Option[Boolean] = Some(true)
 }

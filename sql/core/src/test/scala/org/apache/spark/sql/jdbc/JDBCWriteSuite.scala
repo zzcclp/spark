@@ -38,6 +38,14 @@ class JDBCWriteSuite extends SharedSQLContext with BeforeAndAfter {
   properties.setProperty("password", "testPass")
   properties.setProperty("rowId", "false")
 
+  val testH2Dialect = new JdbcDialect {
+    override def canHandle(url: String) : Boolean = url.startsWith("jdbc:h2")
+    override def getCatalystType(
+        sqlType: Int, typeName: String, size: Int, md: MetadataBuilder): Option[DataType] =
+      Some(StringType)
+    override def isCascadingTruncateTable(): Option[Boolean] = Some(false)
+  }
+
   before {
     Utils.classForName("org.h2.Driver")
     conn = DriverManager.getConnection(url)
@@ -119,14 +127,25 @@ class JDBCWriteSuite extends SharedSQLContext with BeforeAndAfter {
     assert(2 === sqlContext.read.jdbc(url, "TEST.APPENDTEST", new Properties).collect()(0).length)
   }
 
-  test("CREATE then INSERT to truncate") {
+  test("Truncate") {
+    JdbcDialects.registerDialect(testH2Dialect)
     val df = sqlContext.createDataFrame(sparkContext.parallelize(arr2x2), schema2)
     val df2 = sqlContext.createDataFrame(sparkContext.parallelize(arr1x2), schema2)
+    val df3 = sqlContext.createDataFrame(sparkContext.parallelize(arr2x3), schema3)
 
     df.write.jdbc(url1, "TEST.TRUNCATETEST", properties)
-    df2.write.mode(SaveMode.Overwrite).jdbc(url1, "TEST.TRUNCATETEST", properties)
+    df2.write.mode(SaveMode.Overwrite).option("truncate", true.toString())
+      .jdbc(url1, "TEST.TRUNCATETEST", properties)
     assert(1 === sqlContext.read.jdbc(url1, "TEST.TRUNCATETEST", properties).count)
     assert(2 === sqlContext.read.jdbc(url1, "TEST.TRUNCATETEST", properties).collect()(0).length)
+
+    val m = intercept[org.apache.spark.SparkException] {
+      df3.write.mode(SaveMode.Overwrite).option("truncate", true.toString())
+        .jdbc(url1, "TEST.TRUNCATETEST", properties)
+    }.getMessage
+    assert(m.contains("Column \"seq\" not found"))
+    assert(0 === sqlContext.read.jdbc(url1, "TEST.TRUNCATETEST", properties).count())
+    JdbcDialects.unregisterDialect(testH2Dialect)
   }
 
   test("Incompatible INSERT to append") {
