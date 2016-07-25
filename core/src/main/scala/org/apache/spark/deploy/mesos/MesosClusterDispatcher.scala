@@ -103,6 +103,7 @@ private[mesos] object MesosClusterDispatcher extends Logging {
     }
     val dispatcher = new MesosClusterDispatcher(dispatcherArgs, conf)
     dispatcher.start()
+    logDebug("Adding shutdown hook") // force eager creation of logger
     val shutdownHook = new Thread() {
       override def run() {
         logInfo("Shutdown hook is shutting down dispatcher")

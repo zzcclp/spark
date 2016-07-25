@@ -118,6 +118,7 @@ object ExternalShuffleService extends Logging {
     server = newShuffleService(sparkConf, securityManager)
     server.start()
 
+    logDebug("Adding shutdown hook") // force eager creation of logger
     installShutdownHook()
 
     // keep running until the process is terminated
