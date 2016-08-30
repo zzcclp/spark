@@ -23,7 +23,6 @@ import java.io.EOFException
 
 import scala.collection.immutable.Map
 import scala.reflect.ClassTag
-import scala.collection.mutable.ListBuffer
 
 import org.apache.hadoop.conf.{Configurable, Configuration}
 import org.apache.hadoop.mapred.FileSplit
@@ -305,7 +304,7 @@ class HadoopRDD[K, V](
         try {
           val lsplit = c.inputSplitWithLocationInfo.cast(hsplit)
           val infos = c.getLocationInfo.invoke(lsplit).asInstanceOf[Array[AnyRef]]
-          Some(HadoopRDD.convertSplitLocationInfo(infos))
+          HadoopRDD.convertSplitLocationInfo(infos)
         } catch {
           case e: Exception =>
             logDebug("Failed to use InputSplitWithLocations.", e)
@@ -407,21 +406,20 @@ private[spark] object HadoopRDD extends Logging {
       None
   }
 
-  private[spark] def convertSplitLocationInfo(infos: Array[AnyRef]): Seq[String] = {
-    val out = ListBuffer[String]()
-    infos.foreach { loc => {
-      val locationStr = HadoopRDD.SPLIT_INFO_REFLECTIONS.get.
-        getLocation.invoke(loc).asInstanceOf[String]
+  private[spark] def convertSplitLocationInfo(infos: Array[AnyRef]): Option[Seq[String]] = {
+    Option(infos).map(_.flatMap { loc =>
+      val reflections = HadoopRDD.SPLIT_INFO_REFLECTIONS.get
+      val locationStr = reflections.getLocation.invoke(loc).asInstanceOf[String]
       if (locationStr != "localhost") {
-        if (HadoopRDD.SPLIT_INFO_REFLECTIONS.get.isInMemory.
-                invoke(loc).asInstanceOf[Boolean]) {
-          logDebug("Partition " + locationStr + " is cached by Hadoop.")
-          out += new HDFSCacheTaskLocation(locationStr).toString
+        if (reflections.isInMemory.invoke(loc).asInstanceOf[Boolean]) {
+          logDebug(s"Partition $locationStr is cached by Hadoop.")
+          Some(HDFSCacheTaskLocation(locationStr).toString)
         } else {
-          out += new HostTaskLocation(locationStr).toString
+          Some(HostTaskLocation(locationStr).toString)
         }
+      } else {
+        None
       }
-    }}
-    out.seq
+    })
   }
 }
