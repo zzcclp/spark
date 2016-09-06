@@ -28,7 +28,7 @@ import scala.reflect.ClassTag
 private[streaming]
 class StateDStream[K: ClassTag, V: ClassTag, S: ClassTag](
     parent: DStream[(K, V)],
-    updateFunc: (Iterator[(K, Seq[V], Option[S])]) => Iterator[(K, S)],
+    updateFunc: (Iterator[(K, Seq[V], Option[S])], Time) => Iterator[(K, S)],
     partitioner: Partitioner,
     preservePartitioning: Boolean,
     initialRDD : Option[RDD[(K, S)]]
@@ -43,7 +43,9 @@ class StateDStream[K: ClassTag, V: ClassTag, S: ClassTag](
   override val mustCheckpoint = true
 
   private [this] def computeUsingPreviousRDD (
-    parentRDD : RDD[(K, V)], prevStateRDD : RDD[(K, S)]) = {
+    batchTime: Time,
+    parentRDD: RDD[(K, V)],
+    prevStateRDD: RDD[(K, S)]) = {
     // Define the function for the mapPartition operation on cogrouped RDD;
     // first map the cogrouped tuple to tuples of required type,
     // and then apply the update function
@@ -54,7 +56,7 @@ class StateDStream[K: ClassTag, V: ClassTag, S: ClassTag](
         val headOption = if (itr.hasNext) Some(itr.next()) else None
         (t._1, t._2._1.toSeq, headOption)
       })
-      updateFuncLocal(i)
+      updateFuncLocal(i, batchTime)
     }
     val cogroupedRDD = parentRDD.cogroup(prevStateRDD, partitioner)
     val stateRDD = cogroupedRDD.mapPartitions(finalFunc, preservePartitioning)
@@ -71,7 +73,7 @@ class StateDStream[K: ClassTag, V: ClassTag, S: ClassTag](
         // Try to get the parent RDD
         parent.getOrCompute(validTime) match {
           case Some(parentRDD) => {   // If parent RDD exists, then compute as usual
-            computeUsingPreviousRDD (parentRDD, prevStateRDD)
+            computeUsingPreviousRDD (validTime, parentRDD, prevStateRDD)
           }
           case None => {    // If parent RDD does not exist
 
@@ -79,7 +81,7 @@ class StateDStream[K: ClassTag, V: ClassTag, S: ClassTag](
             val updateFuncLocal = updateFunc
             val finalFunc = (iterator: Iterator[(K, S)]) => {
               val i = iterator.map(t => (t._1, Seq[V](), Option(t._2)))
-              updateFuncLocal(i)
+              updateFuncLocal(i, validTime)
             }
             val stateRDD = prevStateRDD.mapPartitions(finalFunc, preservePartitioning)
             Some(stateRDD)
@@ -99,7 +101,9 @@ class StateDStream[K: ClassTag, V: ClassTag, S: ClassTag](
                 // and then apply the update function
                 val updateFuncLocal = updateFunc
                 val finalFunc = (iterator : Iterator[(K, Iterable[V])]) => {
-                  updateFuncLocal (iterator.map (tuple => (tuple._1, tuple._2.toSeq, None)))
+                  updateFuncLocal (
+                    iterator.map (tuple => (tuple._1, tuple._2.toSeq, None)),
+                    validTime)
                 }
 
                 val groupedRDD = parentRDD.groupByKey (partitioner)
@@ -108,7 +112,7 @@ class StateDStream[K: ClassTag, V: ClassTag, S: ClassTag](
                 Some (sessionRDD)
               }
               case Some (initialStateRDD) => {
-                computeUsingPreviousRDD(parentRDD, initialStateRDD)
+                computeUsingPreviousRDD(validTime, parentRDD, initialStateRDD)
               }
             }
           }
