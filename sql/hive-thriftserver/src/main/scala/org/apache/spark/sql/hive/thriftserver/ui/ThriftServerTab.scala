@@ -23,7 +23,7 @@ import org.apache.spark.ui.{SparkUI, SparkUITab}
 import org.apache.spark.{SparkContext, Logging, SparkException}
 
 /**
- * Spark Web UI tab that shows statistics of a streaming job.
+ * Spark Web UI tab that shows statistics of jobs running in the thrift server.
  * This assumes the given SparkContext has enabled its SparkUI.
  */
 private[thriftserver] class ThriftServerTab(sparkContext: SparkContext)
