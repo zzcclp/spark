@@ -25,9 +25,9 @@ the `spark-shell`, `pyspark` shell, or `sparkR` shell.
 One use of Spark SQL is to execute SQL queries written using either a basic SQL syntax or HiveQL.
 Spark SQL can also be used to read data from an existing Hive installation. For more on how to
 configure this feature, please refer to the [Hive Tables](#hive-tables) section. When running
-SQL from within another programming language the results will be returned as a [DataFrame](#DataFrames).
+SQL from within another programming language the results will be returned as a [DataFrame](#dataframes).
 You can also interact with the SQL interface using the [command-line](#running-the-spark-sql-cli)
-or over [JDBC/ODBC](#running-the-thrift-jdbcodbc-server).
+or over [JDBC/ODBC](#running-the-thrift-jdbc-odbc-server).
 
 ## DataFrames
 
@@ -1912,7 +1912,7 @@ the Data Sources API. The following options are supported:
   </tr>
   
   <tr>
-    <td><code>fetchSize</code></td>
+    <td><code>fetchsize</code></td>
     <td>
       The JDBC fetch size, which determines how many rows to fetch per round trip. This can help performance on JDBC drivers which default to low fetch size (eg. Oracle with 10 rows).
     </td>

@@ -83,7 +83,7 @@ class JDBCSuite extends SparkFunSuite
         |CREATE TEMPORARY TABLE fetchtwo
         |USING org.apache.spark.sql.jdbc
         |OPTIONS (url '$url', dbtable 'TEST.PEOPLE', user 'testUser', password 'testPass',
-        |         fetchSize '2')
+        |         fetchsize '2')
       """.stripMargin.replaceAll("\n", " "))
 
     sql(
@@ -273,7 +273,7 @@ class JDBCSuite extends SparkFunSuite
     assert(names(2).equals("mary"))
   }
 
-  test("SELECT first field when fetchSize is two") {
+  test("SELECT first field when fetchsize is two") {
     val names = sql("SELECT NAME FROM fetchtwo").collect().map(x => x.getString(0)).sortWith(_ < _)
     assert(names.size === 3)
     assert(names(0).equals("fred"))
@@ -289,7 +289,7 @@ class JDBCSuite extends SparkFunSuite
     assert(ids(2) === 3)
   }
 
-  test("SELECT second field when fetchSize is two") {
+  test("SELECT second field when fetchsize is two") {
     val ids = sql("SELECT THEID FROM fetchtwo").collect().map(x => x.getInt(0)).sortWith(_ < _)
     assert(ids.size === 3)
     assert(ids(0) === 1)
@@ -336,9 +336,9 @@ class JDBCSuite extends SparkFunSuite
       urlWithUserAndPass, "TEST.PEOPLE", new Properties).collect().length === 3)
   }
 
-  test("Basic API with FetchSize") {
+  test("Basic API with fetchsize") {
     val properties = new Properties
-    properties.setProperty("fetchSize", "2")
+    properties.setProperty("fetchsize", "2")
     assert(sqlContext.read.jdbc(
       urlWithUserAndPass, "TEST.PEOPLE", properties).collect().length === 3)
   }
