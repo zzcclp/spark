@@ -1636,6 +1636,21 @@ private[spark] object Utils extends Logging {
   }
 
   /**
+   * Generate a zipWithIndex iterator, avoid index value overflowing problem
+   * in scala's zipWithIndex
+   */
+  def getIteratorZipWithIndex[T](iterator: Iterator[T], startIndex: Long): Iterator[(T, Long)] = {
+    new Iterator[(T, Long)] {
+      var index: Long = startIndex - 1L
+      def hasNext: Boolean = iterator.hasNext
+      def next(): (T, Long) = {
+        index += 1L
+        (iterator.next(), index)
+      }
+    }
+  }
+
+  /**
    * Creates a symlink. Note jdk1.7 has Files.createSymbolicLink but not used here
    * for jdk1.6 support.  Supports windows by doing copy, everything else uses "ln -sf".
    * @param src absolute path to the source
