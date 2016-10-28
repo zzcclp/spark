@@ -1641,6 +1641,7 @@ private[spark] object Utils extends Logging {
    */
   def getIteratorZipWithIndex[T](iterator: Iterator[T], startIndex: Long): Iterator[(T, Long)] = {
     new Iterator[(T, Long)] {
+      require(startIndex >= 0, "startIndex should be >= 0.")
       var index: Long = startIndex - 1L
       def hasNext: Boolean = iterator.hasNext
       def next(): (T, Long) = {
