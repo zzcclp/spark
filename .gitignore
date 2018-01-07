@@ -88,3 +88,7 @@ spark-warehouse/
 *.Rproj.*
 
 .Rproj.user
+*/.cache-main
+*/.cache-tests
+*/*/.cache-main
+*/*/.cache-tests
