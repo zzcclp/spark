@@ -2649,6 +2649,14 @@ object functions {
     FromUnixTime(ut.expr, Literal(f))
   }
 
+  def from_unixtime_tz(ut: Column, f: String): Column = withExpr {
+    FromUnixTimeTZ(ut.expr, Literal(f))
+  }
+
+  def unix_timestamp_tz(s: Column, p: String): Column = withExpr {
+    UnixTimestampTZ(s.expr, Literal(p))
+  }
+
   /**
    * Gets current Unix timestamp in seconds.
    * @group datetime_funcs
