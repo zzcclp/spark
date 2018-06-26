@@ -20,6 +20,7 @@ package org.apache.spark.sql.execution.metric
 import java.io.File
 
 import scala.collection.mutable.HashMap
+import scala.concurrent.{ExecutionContext, ExecutionContextExecutor, Future}
 
 import org.apache.spark.SparkFunSuite
 import org.apache.spark.scheduler.{SparkListener, SparkListenerTaskEnd}
@@ -370,6 +371,40 @@ class SQLMetricsSuite extends SparkFunSuite with SharedSQLContext {
       //   3. crossJoin(...) of 1. and 2. => (0, 30, 300)
       //   4. shuffle & return results    => (0, 300, 0)
       assert(res3 === (10L, 0L, 10L) :: (30L, 0L, 30L) :: (0L, 30L, 300L) :: (0L, 300L, 0L) :: Nil)
+    }
+  }
+
+  test("writing metrics from single thread") {
+    val nAdds = 10
+    val acc = new SQLMetric("test", -10)
+    assert(acc.isZero())
+    acc.set(0)
+    for (i <- 1 to nAdds) acc.add(1)
+    assert(!acc.isZero())
+    assert(nAdds === acc.value)
+    acc.reset()
+    assert(acc.isZero())
+  }
+
+  test("writing metrics from multiple threads") {
+    implicit val ec: ExecutionContextExecutor = ExecutionContext.global
+    val nFutures = 1000
+    val nAdds = 100
+    val acc = new SQLMetric("test", -10)
+    assert(acc.isZero() === true)
+    acc.set(0)
+    val l = for ( i <- 1 to nFutures ) yield {
+      Future {
+        for (j <- 1 to nAdds) acc.add(1)
+        i
+      }
+    }
+    for (futures <- Future.sequence(l)) {
+      assert(nFutures === futures.length)
+      assert(!acc.isZero())
+      assert(nFutures * nAdds === acc.value)
+      acc.reset()
+      assert(acc.isZero())
     }
   }
 }
