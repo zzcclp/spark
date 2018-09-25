@@ -32,7 +32,8 @@ import org.apache.spark.streaming.scheduler.JobGenerator
 import org.apache.spark.util.Utils
 
 private[streaming]
-class Checkpoint(ssc: StreamingContext, val checkpointTime: Time)
+class Checkpoint(ssc: StreamingContext, val checkpointTime: Time,
+  val afterBatchCompletion: Boolean = false)
   extends Logging with Serializable {
   val master = ssc.sc.master
   val framework = ssc.sc.appName
