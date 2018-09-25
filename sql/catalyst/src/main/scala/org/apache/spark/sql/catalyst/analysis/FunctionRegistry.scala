@@ -399,6 +399,9 @@ object FunctionRegistry {
     expression[Year]("year"),
     expression[TimeWindow]("window"),
 
+    expression[FromUnixTimeTZ]("from_unixtime_tz"),
+    expression[UnixTimestampTZ]("unix_timestamp_tz"),
+
     // collection functions
     expression[CreateArray]("array"),
     expression[ArrayContains]("array_contains"),

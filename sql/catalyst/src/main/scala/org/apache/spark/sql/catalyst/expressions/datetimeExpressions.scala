@@ -846,6 +846,183 @@ case class FromUnixTime(sec: Expression, format: Expression, timeZoneId: Option[
 }
 
 /**
+ * Converts the number of seconds from unix epoch (1970-01-01 00:00:00 UTC) to a string
+ * representing the timestamp of that moment in the given time zone in the given
+ * format.
+ */
+@ExpressionDescription(
+  usage = "_FUNC_(unix_time, format_tz) - Returns `unix_time` in the specified `format`.",
+  extended = """
+    Examples:
+      > SELECT _FUNC_(0, 'yyyy-MM-dd HH:mm:ss@GMT+08:00');
+       1970-01-01 08:00:00
+  """)
+case class FromUnixTimeTZ(sec: Expression, format: Expression)
+  extends BinaryExpression with ImplicitCastInputTypes {
+
+  override def left: Expression = sec
+  override def right: Expression = format
+
+  private val tzSplit = "@"
+  private val tzDefaul = "GMT+00:00"
+
+  override def prettyName: String = "from_unixtime_tz"
+
+  override def dataType: DataType = StringType
+  override def nullable: Boolean = true
+
+  override def inputTypes: Seq[AbstractDataType] = Seq(LongType, StringType)
+
+  private lazy val constFormatTZ: UTF8String = right.eval().asInstanceOf[UTF8String]
+  private lazy val tzSplitIdx = constFormatTZ.toString.indexOf(tzSplit)
+  private lazy val timeZoneStr = if (tzSplitIdx != -1) {
+    constFormatTZ.toString.substring(tzSplitIdx + 1)
+  } else {
+    tzDefaul
+  }
+  private lazy val constFormat = if (tzSplitIdx != -1) {
+    UTF8String.fromString(constFormatTZ.toString.substring(0, tzSplitIdx))
+  } else {
+    constFormatTZ
+  }
+  @transient lazy val timeZone: TimeZone = DateTimeUtils.getTimeZone(timeZoneStr)
+  private lazy val formatter: DateFormat =
+    try {
+      DateTimeUtils.newDateFormat(constFormat.toString, timeZone)
+    } catch {
+      case NonFatal(_) => null
+    }
+
+  override def eval(input: InternalRow): Any = {
+    val time = left.eval(input)
+    if (time == null) {
+      null
+    } else {
+      if (constFormat == null || formatter == null) {
+        null
+      } else {
+        try {
+          UTF8String.fromString(formatter.format(
+            new java.util.Date(time.asInstanceOf[Long] * 1000L)))
+        } catch {
+          case NonFatal(_) => null
+        }
+      }
+    }
+  }
+
+  override def doGenCode(ctx: CodegenContext, ev: ExprCode): ExprCode = {
+    val df = classOf[DateFormat].getName
+    if (formatter == null) {
+      ExprCode("", "true", "(UTF8String) null")
+    } else {
+      val formatterName = ctx.addReferenceObj("formatter", formatter, df)
+      val t = left.genCode(ctx)
+      ev.copy(code = s"""
+        ${t.code}
+        boolean ${ev.isNull} = ${t.isNull};
+        ${ctx.javaType(dataType)} ${ev.value} = ${ctx.defaultValue(dataType)};
+        if (!${ev.isNull}) {
+          try {
+            ${ev.value} = UTF8String.fromString($formatterName.format(
+              new java.util.Date(${t.value} * 1000L)));
+          } catch (java.lang.IllegalArgumentException e) {
+            ${ev.isNull} = true;
+          }
+        }""")
+    }
+  }
+}
+
+/**
+ * Converts time string with given pattern.
+ * (see [http://docs.oracle.com/javase/tutorial/i18n/format/simpleDateFormat.html])
+ * to Unix time stamp (in seconds), returns null if fail.
+ */
+@ExpressionDescription(
+  usage = "_FUNC_([expr[, pattern]]) - Returns the UNIX timestamp of specified time.",
+  extended = """
+    Examples:
+      > SELECT _FUNC_('1970-01-01 08:00:00', 'yyyy-MM-dd HH:mm:ss@GMT+08:00');
+       0
+  """)
+case class UnixTimestampTZ(timeExp: Expression, format: Expression)
+  extends BinaryExpression with ImplicitCastInputTypes {
+
+  override def left: Expression = timeExp
+  override def right: Expression = format
+
+  private val tzSplit = "@"
+  private val tzDefaul = "GMT+00:00"
+
+  override def prettyName: String = "unix_timestamp_tz"
+
+  override def dataType: DataType = LongType
+  override def nullable: Boolean = true
+
+  override def inputTypes: Seq[AbstractDataType] = Seq(StringType, StringType)
+
+  private lazy val constFormatTZ: UTF8String = right.eval().asInstanceOf[UTF8String]
+  private lazy val tzSplitIdx = constFormatTZ.toString.indexOf(tzSplit)
+  private lazy val timeZoneStr: String = if (tzSplitIdx != -1) {
+    constFormatTZ.toString.substring(tzSplitIdx + 1)
+  } else {
+    tzDefaul
+  }
+  private lazy val constFormat: UTF8String = if (tzSplitIdx != -1) {
+    UTF8String.fromString(constFormatTZ.toString.substring(0, tzSplitIdx))
+  } else {
+    constFormatTZ
+  }
+  @transient lazy val timeZone: TimeZone = DateTimeUtils.getTimeZone(timeZoneStr)
+  private lazy val formatter: DateFormat =
+    try {
+      DateTimeUtils.newDateFormat(constFormat.toString, timeZone)
+    } catch {
+      case NonFatal(_) => null
+    }
+
+  override def eval(input: InternalRow): Any = {
+    val time = left.eval(input)
+    if (time == null) {
+      null
+    } else {
+      if (constFormat == null || formatter == null) {
+        null
+      } else {
+        try {
+          formatter.parse(
+            time.asInstanceOf[UTF8String].toString).getTime / 1000L
+        } catch {
+          case NonFatal(_) => null
+        }
+      }
+    }
+  }
+
+  override def doGenCode(ctx: CodegenContext, ev: ExprCode): ExprCode = {
+    val df = classOf[DateFormat].getName
+    if (formatter == null) {
+      ExprCode("", "true", ctx.defaultValue(dataType))
+    } else {
+      val formatterName = ctx.addReferenceObj("formatter", formatter, df)
+      val eval1 = left.genCode(ctx)
+      ev.copy(code = s"""
+        ${eval1.code}
+        boolean ${ev.isNull} = ${eval1.isNull};
+        ${ctx.javaType(dataType)} ${ev.value} = ${ctx.defaultValue(dataType)};
+        if (!${ev.isNull}) {
+          try {
+            ${ev.value} = $formatterName.parse(${eval1.value}.toString()).getTime() / 1000L;
+          } catch (java.text.ParseException e) {
+            ${ev.isNull} = true;
+          }
+        }""")
+    }
+  }
+}
+
+/**
  * Returns the last day of the month which the date belongs to.
  */
 @ExpressionDescription(
