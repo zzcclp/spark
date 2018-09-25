@@ -91,3 +91,13 @@ spark-warehouse/
 *.Rproj.*
 
 .Rproj.user
+
+*/.cache-main
+*/.cache-tests
+*/*/.cache-main
+*/*/.cache-tests
+*/*/*/.cache-main
+*/*/*/.cache-tests
+
+external/flume-sink/dev/
+external/flume-sink/scalastyle-config.xml
