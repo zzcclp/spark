@@ -413,7 +413,6 @@ class SQLMetricsSuite extends SparkFunSuite with SQLMetricsTestUtils with Shared
     testMetricsDynamicPartition("parquet", "parquet", "t1")
   }
 
-<<<<<<< HEAD
   test("SPARK-26327: FileSourceScanExec metrics") {
     withTable("testDataForScan") {
       spark.range(10).selectExpr("id", "id % 3 as p")
