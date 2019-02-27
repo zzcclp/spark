@@ -114,12 +114,13 @@ private[ui] class ThriftServerPage(parent: ThriftServerTab) extends WebUIPage(""
   }
 
   private def errorMessageCell(errorMessage: String): Seq[Node] = {
-    val isMultiline = errorMessage.indexOf('\n') >= 0
+    val errorMsg = if (Option(errorMessage).isDefined) errorMessage else ""
+    val isMultiline = errorMsg.indexOf('\n') >= 0
     val errorSummary = StringEscapeUtils.escapeHtml4(
       if (isMultiline) {
-        errorMessage.substring(0, errorMessage.indexOf('\n'))
+        errorMsg.substring(0, errorMsg.indexOf('\n'))
       } else {
-        errorMessage
+        errorMsg
       })
     val details = if (isMultiline) {
       // scalastyle:off
@@ -128,7 +129,7 @@ private[ui] class ThriftServerPage(parent: ThriftServerTab) extends WebUIPage(""
         + details
       </span> ++
       <div class="stacktrace-details collapsed">
-        <pre>{errorMessage}</pre>
+        <pre>{errorMsg}</pre>
       </div>
       // scalastyle:on
     } else {
