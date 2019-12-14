@@ -226,6 +226,8 @@
     <spark.test.home>${session.executionRootDirectory}</spark.test.home>
 
     <CodeCacheSize>512m</CodeCacheSize>
+
+    <scalastyle.failonviolation>true</scalastyle.failonviolation>
   </properties>
   <repositories>
     <repository>
@@ -2508,7 +2510,7 @@
         <version>1.0.0</version>
         <configuration>
           <verbose>false</verbose>
-          <failOnViolation>true</failOnViolation>
+          <failOnViolation>${scalastyle.failonviolation}</failOnViolation>
           <includeTestSourceDirectory>false</includeTestSourceDirectory>
           <failOnWarning>false</failOnWarning>
           <sourceDirectory>${basedir}/src/main/scala</sourceDirectory>
