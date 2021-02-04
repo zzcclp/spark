@@ -37,6 +37,8 @@ import org.apache.spark.sql.execution.vectorized.OnHeapColumnVector;
 import org.apache.spark.sql.vectorized.ColumnarBatch;
 import org.apache.spark.sql.types.StructField;
 import org.apache.spark.sql.types.StructType;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 /**
  * A specialized RecordReader that reads into InternalRows or ColumnarBatches directly using the
@@ -50,6 +52,9 @@ import org.apache.spark.sql.types.StructType;
  * TODO: make this always return ColumnarBatches.
  */
 public class VectorizedParquetRecordReader extends SpecificParquetRecordReaderBase<Object> {
+
+  private static final Logger logger =
+          LoggerFactory.getLogger(SpecificParquetRecordReaderBase.class);
 
   // The capacity of vectorized batch.
   private int capacity;
@@ -272,6 +277,7 @@ public class VectorizedParquetRecordReader extends SpecificParquetRecordReaderBa
     missingColumns = new boolean[requestedSchema.getFieldCount()];
     List<ColumnDescriptor> columns = requestedSchema.getColumns();
     List<String[]> paths = requestedSchema.getPaths();
+    long startTime = System.nanoTime();
     for (int i = 0; i < requestedSchema.getFieldCount(); ++i) {
       Type t = requestedSchema.getFields().get(i);
       if (!t.isPrimitive() || t.isRepetition(Type.Repetition.REPEATED)) {
@@ -294,6 +300,8 @@ public class VectorizedParquetRecordReader extends SpecificParquetRecordReaderBa
         missingColumns[i] = true;
       }
     }
+    logger.error("5=====Check the requested schema in " + ((System.nanoTime() - startTime) / 1000000.0) +
+            " ms");
   }
 
   private void checkEndOfRowGroup() throws IOException {

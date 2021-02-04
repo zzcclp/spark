@@ -30,6 +30,9 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import scala.Option;
 
 import static org.apache.parquet.filter2.compat.RowGroupFilter.filterRowGroups;
@@ -75,6 +78,9 @@ import org.apache.spark.util.AccumulatorV2;
  * this way, albeit at a higher cost to implement. This base class is reusable.
  */
 public abstract class SpecificParquetRecordReaderBase<T> extends RecordReader<Void, T> {
+  private static final Logger logger =
+          LoggerFactory.getLogger(SpecificParquetRecordReaderBase.class);
+
   protected Path file;
   protected MessageType fileSchema;
   protected MessageType requestedSchema;
@@ -102,13 +108,24 @@ public abstract class SpecificParquetRecordReaderBase<T> extends RecordReader<Vo
     // if task.side.metadata is set, rowGroupOffsets is null
     if (rowGroupOffsets == null) {
       // then we need to apply the predicate push down filter
+      long startTime = System.nanoTime();
       footer = readFooter(configuration, file, range(split.getStart(), split.getEnd()));
+      logger.error("1=====read parquet footer in " + ((System.nanoTime() - startTime) / 1000000.0) +
+              " ms");
+
       MessageType fileSchema = footer.getFileMetaData().getSchema();
       FilterCompat.Filter filter = getFilter(configuration);
+      startTime = System.nanoTime();
       blocks = filterRowGroups(filter, footer.getBlocks(), fileSchema);
+      logger.error("1=====filter row groups in " + ((System.nanoTime() - startTime) / 1000000.0) +
+              " ms");
     } else {
       // otherwise we find the row groups that were selected on the client
+      long startTime = System.nanoTime();
       footer = readFooter(configuration, file, NO_FILTER);
+      logger.error("2=====read parquet footer in " + ((System.nanoTime() - startTime) / 1000000.0) +
+              " ms");
+      startTime = System.nanoTime();
       Set<Long> offsets = new HashSet<>();
       for (long offset : rowGroupOffsets) {
         offsets.add(offset);
@@ -134,7 +151,10 @@ public abstract class SpecificParquetRecordReaderBase<T> extends RecordReader<Vo
                 + " out of: " + Arrays.toString(foundRowGroupOffsets)
                 + " in range " + split.getStart() + ", " + split.getEnd());
       }
+      logger.error("2=====get row groups in " + ((System.nanoTime() - startTime) / 1000000.0) +
+              " ms");
     }
+    long startTime = System.nanoTime();
     this.fileSchema = footer.getFileMetaData().getSchema();
     Map<String, String> fileMetadata = footer.getFileMetaData().getKeyValueMetaData();
     ReadSupport<T> readSupport = getReadSupportInstance(getReadSupportClass(configuration));
@@ -146,6 +166,9 @@ public abstract class SpecificParquetRecordReaderBase<T> extends RecordReader<Vo
     this.sparkSchema = StructType$.MODULE$.fromString(sparkRequestedSchemaString);
     this.reader = new ParquetFileReader(
         configuration, footer.getFileMetaData(), file, blocks, requestedSchema.getColumns());
+    logger.error("3=====Create ParquetFileReader in " +
+            ((System.nanoTime() - startTime) / 1000000.0) + " ms");
+    startTime = System.nanoTime();
     // use the blocks from the reader in case some do not match filters and will not be read
     for (BlockMetaData block : reader.getRowGroups()) {
       this.totalRowCount += block.getRowCount();
@@ -164,6 +187,8 @@ public abstract class SpecificParquetRecordReaderBase<T> extends RecordReader<Vo
         intAccum.add(blocks.size());
       }
     }
+    logger.error("4=====Get RowGroup count in " +
+            ((System.nanoTime() - startTime) / 1000000.0) + " ms");
   }
 
   /**

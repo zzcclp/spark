@@ -75,6 +75,8 @@ class FileScanRDD(
     val iterator = new Iterator[Object] with AutoCloseable {
       private val inputMetrics = context.taskMetrics().inputMetrics
       private val existingBytesRead = inputMetrics.bytesRead
+      private var startTime = System.nanoTime()
+      private var startTime1 = System.nanoTime()
 
       // Find a function that will return the FileSystem bytes read by this thread. Do this before
       // apply readFunction, because it might read some bytes.
@@ -176,7 +178,9 @@ class FileScanRDD(
           } else {
             currentIterator = readCurrentFile()
           }
-
+          logError("6=====read parquet data in " +
+            ((System.nanoTime() - startTime) / 1000000.0) + " ms");
+          startTime = System.nanoTime()
           try {
             hasNext
           } catch {
@@ -204,6 +208,8 @@ class FileScanRDD(
       override def close(): Unit = {
         incTaskInputMetricsBytesRead()
         InputFileBlockHolder.unset()
+        logError("7=====closed, read parquet data in " +
+          ((System.nanoTime() - startTime1) / 1000000.0) + " ms");
       }
     }
 
