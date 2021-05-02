@@ -30,13 +30,15 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import scala.Option;
 
 import static org.apache.parquet.filter2.compat.RowGroupFilter.filterRowGroups;
 import static org.apache.parquet.format.converter.ParquetMetadataConverter.NO_FILTER;
 import static org.apache.parquet.format.converter.ParquetMetadataConverter.range;
-import static org.apache.parquet.hadoop.ParquetFileReader.readFooter;
 import static org.apache.parquet.hadoop.ParquetInputFormat.getFilter;
+import static org.apache.spark.sql.execution.datasources.parquet.ParquetFooterReader.readFooter;
 
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.fs.Path;
@@ -75,6 +77,8 @@ import org.apache.spark.util.AccumulatorV2;
  * this way, albeit at a higher cost to implement. This base class is reusable.
  */
 public abstract class SpecificParquetRecordReaderBase<T> extends RecordReader<Void, T> {
+
+  private final Logger logger = LoggerFactory.getLogger(SpecificParquetRecordReaderBase.class);
   protected Path file;
   protected MessageType fileSchema;
   protected MessageType requestedSchema;
@@ -88,6 +92,16 @@ public abstract class SpecificParquetRecordReaderBase<T> extends RecordReader<Vo
 
   protected ParquetFileReader reader;
 
+  protected ParquetMetadata footer;
+
+  public ParquetMetadata getFooter() {
+    return footer;
+  }
+
+  public void setFooter(ParquetMetadata footer) {
+    this.footer = footer;
+  }
+
   @Override
   public void initialize(InputSplit inputSplit, TaskAttemptContext taskAttemptContext)
       throws IOException, InterruptedException {
@@ -96,19 +110,25 @@ public abstract class SpecificParquetRecordReaderBase<T> extends RecordReader<Vo
     this.file = split.getPath();
     long[] rowGroupOffsets = split.getRowGroupOffsets();
 
-    ParquetMetadata footer;
     List<BlockMetaData> blocks;
 
     // if task.side.metadata is set, rowGroupOffsets is null
+    long start = System.currentTimeMillis();
     if (rowGroupOffsets == null) {
       // then we need to apply the predicate push down filter
-      footer = readFooter(configuration, file, range(split.getStart(), split.getEnd()));
+      if (footer == null) {
+        footer = readFooter(configuration, file, range(split.getStart(), split.getEnd()));
+      }
+      logger.error("---------------- record reader1 " + (System.currentTimeMillis() - start));
       MessageType fileSchema = footer.getFileMetaData().getSchema();
       FilterCompat.Filter filter = getFilter(configuration);
       blocks = filterRowGroups(filter, footer.getBlocks(), fileSchema);
     } else {
       // otherwise we find the row groups that were selected on the client
-      footer = readFooter(configuration, file, NO_FILTER);
+      if (footer == null) {
+        footer = readFooter(configuration, file, NO_FILTER);
+      }
+      logger.error("---------------- record reader2 " + (System.currentTimeMillis() - start));
       Set<Long> offsets = new HashSet<>();
       for (long offset : rowGroupOffsets) {
         offsets.add(offset);

@@ -17,26 +17,17 @@
 
 package org.apache.spark.sql.execution.datasources.parquet
 
-import java.io.IOException
-import java.net.URI
-
-import scala.collection.JavaConverters._
-import scala.collection.mutable
-import scala.util.{Failure, Try}
-
 import org.apache.hadoop.conf.Configuration
 import org.apache.hadoop.fs.{FileStatus, Path}
 import org.apache.hadoop.mapreduce._
 import org.apache.hadoop.mapreduce.task.TaskAttemptContextImpl
 import org.apache.parquet.filter2.compat.FilterCompat
 import org.apache.parquet.filter2.predicate.FilterApi
-import org.apache.parquet.format.converter.ParquetMetadataConverter.SKIP_ROW_GROUPS
-import org.apache.parquet.hadoop._
+import org.apache.parquet.format.converter.ParquetMetadataConverter.{NO_FILTER, SKIP_ROW_GROUPS, range}
 import org.apache.parquet.hadoop.ParquetOutputFormat.JobSummaryLevel
+import org.apache.parquet.hadoop._
 import org.apache.parquet.hadoop.codec.CodecConfig
 import org.apache.parquet.hadoop.util.ContextUtil
-
-import org.apache.spark.{SparkException, TaskContext}
 import org.apache.spark.internal.Logging
 import org.apache.spark.sql._
 import org.apache.spark.sql.catalyst.InternalRow
@@ -50,6 +41,13 @@ import org.apache.spark.sql.internal.SQLConf
 import org.apache.spark.sql.sources._
 import org.apache.spark.sql.types._
 import org.apache.spark.util.{SerializableConfiguration, ThreadUtils}
+import org.apache.spark.{SparkException, TaskContext}
+
+import java.io.IOException
+import java.net.URI
+import scala.collection.JavaConverters._
+import scala.collection.mutable
+import scala.util.{Failure, Try}
 
 class ParquetFileFormat
   extends FileFormat
@@ -267,11 +265,16 @@ class ParquetFileFormat
 
       val sharedConf = broadcastedHadoopConf.value.value
 
-      lazy val footerFileMetaData =
-        ParquetFileReader.readFooter(sharedConf, filePath, SKIP_ROW_GROUPS).getFileMetaData
+      var start = System.currentTimeMillis()
+      val parquetMetaData = if (split.getRowGroupOffsets == null) {
+        ParquetFooterReader.readFooter(sharedConf, filePath, range(split.getStart, split.getEnd))
+      } else {
+        ParquetFooterReader.readFooter(sharedConf, filePath, NO_FILTER)
+      }
+      logError(s"---------------- get parquet footer ${System.currentTimeMillis() - start}")
       // Try to push down filters when filter push-down is enabled.
       val pushed = if (enableParquetFilterPushDown) {
-        val parquetSchema = footerFileMetaData.getSchema
+        val parquetSchema = parquetMetaData.getFileMetaData.getSchema
         val parquetFilters = new ParquetFilters(parquetSchema, pushDownDate, pushDownTimestamp,
           pushDownDecimal, pushDownStringStartWith, pushDownInFilterThreshold, isCaseSensitive)
         filters
@@ -290,7 +293,7 @@ class ParquetFileFormat
       // have different writers.
       // Define isCreatedByParquetMr as function to avoid unnecessary parquet footer reads.
       def isCreatedByParquetMr: Boolean =
-        footerFileMetaData.getCreatedBy().startsWith("parquet-mr")
+        parquetMetaData.getFileMetaData.getCreatedBy().startsWith("parquet-mr")
 
       val convertTz =
         if (timestampConversion && !isCreatedByParquetMr) {
@@ -300,10 +303,10 @@ class ParquetFileFormat
         }
 
       val datetimeRebaseMode = DataSourceUtils.datetimeRebaseMode(
-        footerFileMetaData.getKeyValueMetaData.get,
+        parquetMetaData.getFileMetaData.getKeyValueMetaData.get,
         SQLConf.get.getConf(SQLConf.LEGACY_PARQUET_REBASE_MODE_IN_READ))
       val int96RebaseMode = DataSourceUtils.int96RebaseMode(
-        footerFileMetaData.getKeyValueMetaData.get,
+        parquetMetaData.getFileMetaData.getKeyValueMetaData.get,
         SQLConf.get.getConf(SQLConf.LEGACY_PARQUET_INT96_REBASE_MODE_IN_READ))
 
       val attemptId = new TaskAttemptID(new TaskID(new JobID(), TaskType.MAP, 0), 0)
@@ -326,6 +329,7 @@ class ParquetFileFormat
         val iter = new RecordReaderIterator(vectorizedReader)
         // SPARK-23457 Register a task completion listener before `initialization`.
         taskContext.foreach(_.addTaskCompletionListener[Unit](_ => iter.close()))
+        vectorizedReader.setFooter(parquetMetaData)
         vectorizedReader.initialize(split, hadoopAttemptContext)
         logDebug(s"Appending $partitionSchema ${file.partitionValues}")
         vectorizedReader.initBatch(partitionSchema, file.partitionValues)
@@ -453,7 +457,7 @@ object ParquetFileFormat extends Logging {
         // ParquetFileReader.readFooter throws RuntimeException, instead of IOException,
         // when it can't read the footer.
         Some(new Footer(currentFile.getPath(),
-          ParquetFileReader.readFooter(
+          ParquetFooterReader.readFooter(
             conf, currentFile, SKIP_ROW_GROUPS)))
       } catch { case e: RuntimeException =>
         if (ignoreCorruptFiles) {
