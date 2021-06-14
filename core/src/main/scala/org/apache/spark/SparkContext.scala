@@ -315,6 +315,10 @@ class SparkContext(config: SparkConf) extends Logging {
 
   private[spark] def schedulerBackend: SchedulerBackend = _schedulerBackend
 
+  var _localCacheManager : Option[LocalDataCacheManager] = None
+
+  def localCacheManagerOpt : Option[LocalDataCacheManager] = _localCacheManager
+
   private[spark] def taskScheduler: TaskScheduler = _taskScheduler
   private[spark] def taskScheduler_=(ts: TaskScheduler): Unit = {
     _taskScheduler = ts
@@ -638,6 +642,9 @@ class SparkContext(config: SparkConf) extends Logging {
 
     // Post init
     _taskScheduler.postStartHook()
+
+    createLocalCacheManager()
+
     if (isLocal) {
       _env.metricsSystem.registerSource(Executor.executorSourceLocalModeOnly)
     }
@@ -2588,6 +2595,13 @@ class SparkContext(config: SparkConf) extends Logging {
   // context as having finished construction.
   // NOTE: this must be placed at the end of the SparkContext constructor.
   SparkContext.setActiveContext(this)
+
+
+  private def createLocalCacheManager(): Unit = {
+    val _localCacheManager1 = new LocalDataCacheManager(new SoftAffinityStrategy())
+    _localCacheManager = Option(_localCacheManager1)
+    this.listenerBus.addToStatusQueue(_localCacheManager1)
+  }
 }
 
 /**

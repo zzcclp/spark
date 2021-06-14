@@ -19,8 +19,9 @@ package org.apache.spark.sql.execution.datasources
 import scala.collection.mutable
 import scala.collection.mutable.ArrayBuffer
 
-import org.apache.spark.Partition
+import org.apache.spark.{Partition, SparkContext}
 import org.apache.spark.internal.Logging
+import org.apache.spark.scheduler.ExecutorCacheTaskLocation
 import org.apache.spark.sql.SparkSession
 import org.apache.spark.sql.connector.read.InputPartition
 
@@ -45,6 +46,32 @@ case class FilePartition(index: Int, files: Array[PartitionedFile])
     }.reverse.take(3).map {
       case (host, numBytes) => host
     }.toArray
+  }
+}
+
+/**
+ * Partition will be cached on some executors according to some strategies
+ */
+case class CachedFilePartition(override val index: Int,
+                               override val files: Array[PartitionedFile],
+                               sparkContext: SparkContext)
+  extends FilePartition(index: Int, files: Array[PartitionedFile]) {
+
+  var localCacheExecutors: Array[String] = _
+
+  override def preferredLocations(): Array[String] = {
+    if (sparkContext.localCacheManagerOpt.isDefined) {
+      localCacheExecutors = sparkContext.localCacheManagerOpt
+        .get.askExecutor(files.map(x => x.filePath))
+        .map(p => ExecutorCacheTaskLocation(p._1, p._2).toString)
+    }
+
+    val originalLocalNode = super.preferredLocations()
+    if (sparkContext.localCacheManagerOpt.isDefined) {
+      localCacheExecutors ++ originalLocalNode
+    } else {
+      originalLocalNode
+    }
   }
 }
 

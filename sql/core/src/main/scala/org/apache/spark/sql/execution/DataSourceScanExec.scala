@@ -555,6 +555,9 @@ case class FileSourceScanExec(
       filesGroupedToBuckets
     }
 
+    val localCachedEnabled = fsRelation.sparkSession
+      .sparkContext.localCacheManagerOpt.isDefined
+
     val filePartitions = optionalNumCoalescedBuckets.map { numCoalescedBuckets =>
       logInfo(s"Coalescing to ${numCoalescedBuckets} buckets")
       val coalescedBuckets = prunedFilesGroupedToBuckets.groupBy(_._1 % numCoalescedBuckets)
@@ -562,11 +565,20 @@ case class FileSourceScanExec(
         val partitionedFiles = coalescedBuckets.get(bucketId).map {
           _.values.flatten.toArray
         }.getOrElse(Array.empty)
-        FilePartition(bucketId, partitionedFiles)
+        if (!localCachedEnabled) {
+          FilePartition(bucketId, partitionedFiles)
+        } else {
+          CachedFilePartition(bucketId, partitionedFiles, sparkContext)
+        }
       }
     }.getOrElse {
       Seq.tabulate(bucketSpec.numBuckets) { bucketId =>
-        FilePartition(bucketId, prunedFilesGroupedToBuckets.getOrElse(bucketId, Array.empty))
+        if (!localCachedEnabled) {
+          FilePartition(bucketId, prunedFilesGroupedToBuckets.getOrElse(bucketId, Array.empty))
+        } else {
+          CachedFilePartition(bucketId, prunedFilesGroupedToBuckets.getOrElse(bucketId, Array.empty)
+            , sparkContext)
+        }
       }
     }
 
