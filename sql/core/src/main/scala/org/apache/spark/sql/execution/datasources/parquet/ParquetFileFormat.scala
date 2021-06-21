@@ -17,14 +17,6 @@
 
 package org.apache.spark.sql.execution.datasources.parquet
 
-import java.io.IOException
-import java.net.URI
-import java.util.Properties
-
-import scala.collection.JavaConverters._
-import scala.collection.mutable
-import scala.util.{Failure, Try}
-
 import org.apache.hadoop.conf.Configuration
 import org.apache.hadoop.fs.{FileStatus, Path}
 import org.apache.hadoop.mapreduce._
@@ -32,12 +24,10 @@ import org.apache.hadoop.mapreduce.task.TaskAttemptContextImpl
 import org.apache.parquet.filter2.compat.FilterCompat
 import org.apache.parquet.filter2.predicate.FilterApi
 import org.apache.parquet.format.converter.ParquetMetadataConverter.SKIP_ROW_GROUPS
-import org.apache.parquet.hadoop._
 import org.apache.parquet.hadoop.ParquetOutputFormat.JobSummaryLevel
+import org.apache.parquet.hadoop._
 import org.apache.parquet.hadoop.codec.CodecConfig
 import org.apache.parquet.hadoop.util.ContextUtil
-
-import org.apache.spark.{SparkException, TaskContext}
 import org.apache.spark.internal.Logging
 import org.apache.spark.sql._
 import org.apache.spark.sql.catalyst.InternalRow
@@ -50,8 +40,14 @@ import org.apache.spark.sql.execution.vectorized.{OffHeapColumnVector, OnHeapCol
 import org.apache.spark.sql.internal.SQLConf
 import org.apache.spark.sql.sources._
 import org.apache.spark.sql.types._
-import org.apache.spark.sql.util.{ConfigurationUtils, ReflectionUtils}
-import org.apache.spark.util.ThreadUtils
+import org.apache.spark.util.{SerializableConfiguration, ThreadUtils}
+import org.apache.spark.{SparkException, TaskContext}
+
+import java.io.IOException
+import java.net.URI
+import scala.collection.JavaConverters._
+import scala.collection.mutable
+import scala.util.{Failure, Try}
 
 class ParquetFileFormat
   extends FileFormat
@@ -236,14 +232,21 @@ class ParquetFileFormat
       SQLConf.PARQUET_FOOTER_USE_OLD_API.key,
       sparkSession.sessionState.conf.parquetFooterUseOldApi)
 
-    // val broadcastedHadoopConf =
-    //   sparkSession.sparkContext.broadcast(new SerializableConfiguration(hadoopConf))
     val start = System.currentTimeMillis()
+    val broadcastedHadoopConf =
+      sparkSession.sparkContext.broadcast(new SerializableConfiguration(hadoopConf))
+    logInfo(s"Broadcast all hadoop conf ${hadoopConf.size()} " +
+      s"took: ${System.currentTimeMillis() - start}")
+
+    /* start = System.currentTimeMillis()
     val overlayProps = ReflectionUtils.getAncestorField[Properties](
       hadoopConf, 0, "overlay")
+    logInfo(s"Broadcast get overlay hadoop conf ${overlayProps.size()} " +
+      s"took: ${System.currentTimeMillis() - start}")
+    start = System.currentTimeMillis()
     val broadcastedOverlay = sparkSession.sparkContext.broadcast(overlayProps)
     logInfo(s"Broadcast overlay hadoop conf ${overlayProps.size()} " +
-      s"took: ${System.currentTimeMillis() - start}")
+      s"took: ${System.currentTimeMillis() - start}") */
 
     // TODO: if you move this into the closure it reverts to the default values.
     // If true, enable using the custom RecordReader for parquet. This only works for
@@ -280,16 +283,26 @@ class ParquetFileFormat
           Array.empty,
           null)
 
-      // val sharedConf = broadcastedHadoopConf.value.value
       val start = System.currentTimeMillis()
+      val sharedConf = broadcastedHadoopConf.value.value
+      logInfo(s"Get all broadcasted hadoop conf ${sharedConf.size()} " +
+        s"took: ${System.currentTimeMillis() - start}")
+
+      /* start = System.currentTimeMillis()
       val overlay = broadcastedOverlay.value
-      val sharedConf = new Configuration(ConfigurationUtils.conf)
+      logInfo(s"Get broadcasted overlay conf ${overlay.size()} " +
+        s"took: ${System.currentTimeMillis() - start}")
+      start = System.currentTimeMillis()
+      val sharedConf = SparkHadoopUtil.get.newConfiguration(SparkEnv.get.conf)
+      logInfo(s"Generate hadoop conf ${sharedConf.size()} " +
+        s"took: ${System.currentTimeMillis() - start}")
+      start = System.currentTimeMillis()
       for (keyValue <- overlay.entrySet().asScala) {
         sharedConf.set(keyValue.getKey.asInstanceOf[String],
           keyValue.getValue.asInstanceOf[String])
       }
       logInfo(s"Get broadcasted overlay hadoop conf ${sharedConf.size()} " +
-        s"${overlay.size()} took: ${System.currentTimeMillis() - start}")
+        s"${overlay.size()} took: ${System.currentTimeMillis() - start}") */
 
       val metaCacheEnabled =
         sharedConf.getBoolean(SQLConf.FILE_META_CACHE_PARQUET_ENABLED.key, false)

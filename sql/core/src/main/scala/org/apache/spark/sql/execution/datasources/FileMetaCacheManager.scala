@@ -49,7 +49,11 @@ private[sql] object FileMetaCacheManager extends Logging {
   private lazy val ttlTime =
     SparkEnv.get.conf.get(SQLConf.FILE_META_CACHE_TTL_SINCE_LAST_ACCESS)
 
+  private lazy val cacheMaxSize =
+    SparkEnv.get.conf.get(SQLConf.FILE_META_CACHE_MAX_SIZE)
+
   private lazy val cache = CacheBuilder.newBuilder()
+    .maximumSize(cacheMaxSize)
     .expireAfterAccess(ttlTime, TimeUnit.SECONDS)
     .recordStats()
     .build[FileMetaKey, FileMeta](cacheLoader)

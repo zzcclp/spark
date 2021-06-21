@@ -797,6 +797,12 @@ object SQLConf {
       .timeConf(TimeUnit.SECONDS)
       .createWithDefault(3600L)
 
+  val FILE_META_CACHE_MAX_SIZE =
+    buildConf("spark.sql.fileMetaCache.maxSize")
+      .doc("The max size for file metadata cache entry.")
+      .longConf
+      .createWithDefault(10000L)
+
   val PARQUET_FOOTER_USE_OLD_API = buildConf("spark.sql.parquet.footer.use.old.api")
     .doc("Use old api to read parquet footer.")
     .booleanConf
