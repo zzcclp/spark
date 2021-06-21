@@ -524,7 +524,9 @@ private[spark] class TaskSchedulerImpl(
       }
     }.getOrElse(offers)
 
-    val shuffledOffers = shuffleOffers(filteredOffers)
+    val shuffledOffers =
+      if (conf.getBoolean("spark.shuffle.offers.enabled", true))
+      shuffleOffers(filteredOffers) else filteredOffers
     // Build a list of tasks to assign to each worker.
     // Note the size estimate here might be off with different ResourceProfiles but should be
     // close estimate
