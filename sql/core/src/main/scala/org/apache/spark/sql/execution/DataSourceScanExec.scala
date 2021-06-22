@@ -611,7 +611,12 @@ case class FileSourceScanExec(
     val partitions =
       FilePartition.getFilePartitions(relation.sparkSession, splitFiles, maxSplitBytes)
 
-    new FileScanRDD(fsRelation.sparkSession, readFile, partitions)
+    if (relation.sparkSession.conf.get("kylin.use.local-cache", "false").toBoolean) {
+      val cachePartitions = partitions.map(CacheFilePartition.convertFilePartitionToCache(_))
+      new CacheFileScanRDD(fsRelation.sparkSession, readFile, cachePartitions)
+    } else {
+      new FileScanRDD(fsRelation.sparkSession, readFile, partitions)
+    }
   }
 
   // Filters unused DynamicPruningExpression expressions - one which has been replaced
