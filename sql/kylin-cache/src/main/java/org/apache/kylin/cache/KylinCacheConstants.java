@@ -35,4 +35,12 @@ public class KylinCacheConstants {
 
     public static final String PARAMS_KEY_LOCAL_CACHE_FOR_CURRENT_EXECUTOR =
             "kylin.local-cache.for.current.executor";
+
+    public static final String PARAMS_KEY_TOTAL_EXCEPTED_EXECUTORS_NUM =
+            "kylin.local-cache.total.excepted.executors.num";
+
+    public static final String PARAMS_KEY_CACHE_REPLACATES_NUM =
+            "kylin.local-cache.cache.replacates.num";
+
+    public static final int PARAMS_KEY_CACHE_REPLACATES_NUM_DEFAULT_VALUE = 2;
 }
