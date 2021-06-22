@@ -17,7 +17,7 @@
 
 package org.apache.spark.sql.execution.datasources
 
-import org.apache.kylin.cache.KylinCacheConstants
+import org.apache.kylin.cache.fs.CacheFileSystemConstants
 import org.apache.spark.{SparkEnv, TaskContext, Partition => RDDPartition}
 import org.apache.spark.sql.SparkSession
 import org.apache.spark.sql.catalyst.InternalRow
@@ -54,7 +54,7 @@ class CacheFileScanRDD(
       s"${SparkEnv.get.executorId}, cached: ${convertLocation(cacheFilePartition.files.head.locations)}")
     // Set whether needs to cache data on this executor
     context.getLocalProperties.setProperty(
-      KylinCacheConstants.PARAMS_KEY_LOCAL_CACHE_FOR_CURRENT_EXECUTOR,
+      CacheFileSystemConstants.PARAMS_KEY_LOCAL_CACHE_FOR_CURRENT_FILES,
       convertLocation(cacheFilePartition.files.head.locations).toString)
     super.compute(cacheSplit, context)
   }

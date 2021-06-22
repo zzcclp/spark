@@ -19,6 +19,10 @@
 <configuration>
 
     <property>
+        <name>fs.file.impl</name>
+        <value>org.apache.kylin.cache.fs.kylin.KylinCacheFileSystem</value>
+    </property>
+    <property>
         <name>fs.hdfs.impl</name>
         <value>org.apache.kylin.cache.fs.kylin.KylinCacheFileSystem</value>
     </property>

@@ -23,6 +23,8 @@ import org.apache.hadoop.fs.FSDataInputStream;
 import org.apache.hadoop.fs.FileStatus;
 import org.apache.hadoop.fs.FileSystem;
 import org.apache.hadoop.fs.Path;
+import org.apache.kylin.cache.KylinCacheConstants;
+import org.apache.kylin.cache.fs.CacheFileSystemConstants;
 import org.junit.After;
 import org.junit.Assert;
 import org.junit.Before;
@@ -48,7 +50,7 @@ public class TestKylinCacheFileSystem {
                           boolean isLocalCache) throws IOException {
         FSDataInputStream testInputStream =
                 kylinCacheFileSystem.open(fileStatus.getPath(), 65536, isLocalCache);
-        int readLen = 2 * 1024 * 1024;
+        int readLen = 3 * 1024 * 1024;
         byte[] buf = new byte[readLen];
         testInputStream.read(buf, 0, readLen);
     }
@@ -64,9 +66,10 @@ public class TestKylinCacheFileSystem {
                 this.getClass().getProtectionDomain().getCodeSource().getLocation().getPath();
         Configuration conf = new Configuration();
         conf.set("alluxio.user.client.cache.dir", cacheDir);
-        conf.set("kylin.use.local-cache", "true");
+        conf.set(CacheFileSystemConstants.PARAMS_KEY_USE_CACHE, "true");
         Path path = new Path(
-                new URI("hdfs://mydocker:9000/raptorx_stress_data/"));
+        //        new URI("hdfs://mydocker:9000/raptorx_stress_data/"));
+                new URI("file://" + currPath + "/cache-data-test/"));
         FileSystem fs = path.getFileSystem(conf);
         Assert.assertTrue(fs instanceof KylinCacheFileSystem);
         KylinCacheFileSystem kylinCacheFileSystem = (KylinCacheFileSystem) fs;
@@ -77,12 +80,15 @@ public class TestKylinCacheFileSystem {
                 kylinCacheFileSystem.getScheme());
 
         FileStatus[] fileStatuses = fs.listStatus(path);
-        Assert.assertEquals(8, fileStatuses.length);
+        Assert.assertEquals(4, fileStatuses.length);
 
         readFile(kylinCacheFileSystem, fileStatuses[0], true);
         readFile(kylinCacheFileSystem, fileStatuses[1], false);
         readFile(kylinCacheFileSystem, fileStatuses[2], false);
         readFile(kylinCacheFileSystem, fileStatuses[3], true);
+        readFile(kylinCacheFileSystem, fileStatuses[3], true);
+        readFile(kylinCacheFileSystem, fileStatuses[0], true);
+        readFile(kylinCacheFileSystem, fileStatuses[1], false);
         kylinCacheFileSystem.close();
 
         Assert.assertTrue(cacheFiles.isDirectory() && cacheFiles.exists());

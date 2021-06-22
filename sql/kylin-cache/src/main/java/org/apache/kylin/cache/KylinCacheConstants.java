@@ -21,26 +21,15 @@ public class KylinCacheConstants {
     private KylinCacheConstants() {
     }
 
+    // Todo: change the param key name
     public static final String KYLIN_CACHE_FS =
             "org.apache.kylin.cache.fs.kylin.KylinCacheFileSystem";
 
-    public static final String PARAMS_KEY_USE_CACHE =
-            "kylin.use.local-cache";
-
-    public static final boolean PARAMS_KEY_USE_CACHE_DEFAULT_VALUE = false;
-
-    public static final String PARAMS_KEY_IO_FILE_BUFFER_SIZE = "io.file.buffer.size";
-
-    public static final int PARAMS_KEY_IO_FILE_BUFFER_SIZE_DEFAULT_VALUE = 65536;
-
-    public static final String PARAMS_KEY_LOCAL_CACHE_FOR_CURRENT_EXECUTOR =
-            "kylin.local-cache.for.current.executor";
-
     public static final String PARAMS_KEY_TOTAL_EXCEPTED_EXECUTORS_NUM =
-            "kylin.local-cache.total.excepted.executors.num";
+            "spark.kylin.local-cache.total.excepted.executors.num";
 
     public static final String PARAMS_KEY_CACHE_REPLACATES_NUM =
-            "kylin.local-cache.cache.replacates.num";
+            "spark.kylin.local-cache.cache.replacates.num";
 
     public static final int PARAMS_KEY_CACHE_REPLACATES_NUM_DEFAULT_VALUE = 2;
 }
