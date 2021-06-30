@@ -612,7 +612,9 @@ case class FileSourceScanExec(
 
     if (relation.sparkSession.conf.get(CacheFileSystemConstants.PARAMS_KEY_USE_CACHE,
       "false").toBoolean) {
+      val start = System.currentTimeMillis()
       val cachePartitions = partitions.map(CacheFilePartition.convertFilePartitionToCache(_))
+      logWarning(s"======== Convert file partition took: ${(System.currentTimeMillis() - start)}")
       new CacheFileScanRDD(fsRelation.sparkSession, readFile, cachePartitions)
     } else {
       new FileScanRDD(fsRelation.sparkSession, readFile, partitions)

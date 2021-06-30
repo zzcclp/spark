@@ -28,6 +28,7 @@ import alluxio.metrics.MetricsConfig;
 import alluxio.metrics.MetricsSystem;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.fs.FSDataInputStream;
+import org.apache.hadoop.fs.FileStatus;
 import org.apache.hadoop.fs.FileSystem;
 import org.apache.hadoop.fs.FilterFileSystem;
 import org.apache.hadoop.fs.Path;
@@ -41,6 +42,7 @@ import java.net.URI;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.Properties;
+import java.util.concurrent.ConcurrentHashMap;
 
 public abstract class AbstractCacheFileSystem extends FilterFileSystem {
 
@@ -54,6 +56,9 @@ public abstract class AbstractCacheFileSystem extends FilterFileSystem {
     protected LocalCacheFileInStream.FileInStreamOpener mAlluxioFileOpener;
     protected CacheManager mCacheManager;
     protected AlluxioConfiguration mAlluxioConf;
+
+    protected ConcurrentHashMap<Path, FileStatus> fileStatusMap =
+            new ConcurrentHashMap<Path, FileStatus>();
 
     // put("s3", "com.amazon.ws.emr.hadoop.fs.EmrFileSystem");
     // put("s3n", "com.amazon.ws.emr.hadoop.fs.EmrFileSystem");
@@ -119,8 +124,10 @@ public abstract class AbstractCacheFileSystem extends FilterFileSystem {
         // create internal FileSystem according to the scheme
         this.fs = createInternalFS(name, conf);
         this.statistics = (FileSystem.Statistics) ReflectionUtil.getFieldValue(this.fs, "statistics");
+        LOG.error("======= before {} {} ", this.statistics.getScheme(), this.statistics.toString());
         super.initialize(name, conf);
         this.setConf(conf);
+        LOG.error("======= after  {} {} ", this.statistics.getScheme(), this.statistics.toString());
 
         this.bufferSize = conf.getInt(CacheFileSystemConstants.PARAMS_KEY_IO_FILE_BUFFER_SIZE,
                 CacheFileSystemConstants.PARAMS_KEY_IO_FILE_BUFFER_SIZE_DEFAULT_VALUE);
@@ -155,13 +162,13 @@ public abstract class AbstractCacheFileSystem extends FilterFileSystem {
     public FSDataInputStream open(Path f, int bufferSize) throws IOException {
         if (this.mCacheManager != null
                 && this.isUseLocalCache() && this.isUseLocalCacheForTargetExecs()) {
-            URIStatus status = HadoopUtils.toAlluxioUriStatus(this.fs.getFileStatus(f));
-            LOG.info("Use LocalCacheFileSystem to open file {} .", f);
+            URIStatus status = HadoopUtils.toAlluxioUriStatus(this.getFileStatus(f));
+            LOG.error("Use LocalCacheFileSystem to open file {} .", f);
             return new FSDataInputStream(new HdfsFileInputStream(
                     new LocalCacheFileInStream(status, mAlluxioFileOpener, mCacheManager, mAlluxioConf),
                     statistics));
         }
-        LOG.info("Use original FileSystem to open file {} .", f);
+        LOG.error("Use original FileSystem to open file {} .", f);
         return super.open(f, bufferSize);
     }
 
@@ -171,14 +178,30 @@ public abstract class AbstractCacheFileSystem extends FilterFileSystem {
     public FSDataInputStream open(Path f, int bufferSize, boolean useLocalCacheForExec) throws IOException {
         if (this.mCacheManager != null
                 && this.isUseLocalCache() && useLocalCacheForExec) {
-            URIStatus status = HadoopUtils.toAlluxioUriStatus(this.fs.getFileStatus(f));
-            LOG.info("Use LocalCacheFileSystem to open file {} .", f);
+            URIStatus status = HadoopUtils.toAlluxioUriStatus(this.getFileStatus(f));
+            LOG.error("Use LocalCacheFileSystem to open file {} .", f);
             return new FSDataInputStream(new HdfsFileInputStream(
                     new LocalCacheFileInStream(status, mAlluxioFileOpener, mCacheManager, mAlluxioConf),
                     statistics));
         }
-        LOG.info("Use original FileSystem to open file {} .", f);
+        LOG.error("Use original FileSystem to open file {} .", f);
         return super.open(f, bufferSize);
+    }
+
+    @Override
+    public FileStatus getFileStatus(Path f) throws IOException {
+        long start = System.currentTimeMillis();
+        FileStatus fileStatus = null;
+        if (fileStatusMap.containsKey(f)) {
+            fileStatus = fileStatusMap.get(f);
+            LOG.error("Get file {} status from cache took: {}", f,
+                    (System.currentTimeMillis() - start));
+        } else {
+            fileStatus = this.fs.getFileStatus(f);
+            fileStatusMap.put(f, fileStatus);
+            LOG.error("Get file {} status took: {}", f, (System.currentTimeMillis() - start));
+        }
+        return fileStatus;
     }
 
     public CacheManager getmCacheManager() {

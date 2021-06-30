@@ -46,12 +46,15 @@ class CacheFileScanRDD(
 
   override def compute(split: RDDPartition, context: TaskContext): Iterator[InternalRow] = {
     // Convert 'CacheFilePartition' to 'FilePartition'
+    val start = System.currentTimeMillis()
     val cacheFilePartition = split.asInstanceOf[CacheFilePartition]
     val cacheSplit = FilePartition(cacheFilePartition.index, cacheFilePartition.files.map { f =>
       PartitionedFile(f.partitionValues, f.filePath, f.start, f.length, f.locations.map(_._1))
     })
-    logInfo(s"========= compute file: ${cacheFilePartition.files.head}," +
-      s"${SparkEnv.get.executorId}, cached: ${convertLocation(cacheFilePartition.files.head.locations)}")
+    logError(s"========= compute file: ${cacheFilePartition.files.head}," +
+      s"${SparkEnv.get.executorId}, cached: " +
+      s"${convertLocation(cacheFilePartition.files.head.locations)} " +
+      s"took ${(System.currentTimeMillis() - start)}")
     // Set whether needs to cache data on this executor
     context.getLocalProperties.setProperty(
       CacheFileSystemConstants.PARAMS_KEY_LOCAL_CACHE_FOR_CURRENT_FILES,

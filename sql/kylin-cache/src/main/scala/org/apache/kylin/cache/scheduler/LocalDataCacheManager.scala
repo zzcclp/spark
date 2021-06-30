@@ -176,6 +176,7 @@ class SoftAffinityStrategy extends CacheAllocationStrategy with Logging {
   def allocate(files: Array[String],
                candidates: ListBuffer[Option[String]]): Array[String] = {
     val candidatesSize = candidates.size
+    val halfCandidatesSize = candidatesSize / cacheReplicatesNum
     val resultSet = new mutable.LinkedHashSet[String]
 
     var mod = files.head.hashCode % candidatesSize
@@ -184,7 +185,7 @@ class SoftAffinityStrategy extends CacheAllocationStrategy with Logging {
       resultSet.add(candidates(c1).get)
     }
     for (i <- 1 to (cacheReplicatesNum - 1)) {
-      val c2 = (c1 + i) % candidatesSize
+      val c2 = (c1 + halfCandidatesSize + i) % candidatesSize
       if (candidates(c2).isDefined) {
         resultSet.add(candidates(c2).get)
       }

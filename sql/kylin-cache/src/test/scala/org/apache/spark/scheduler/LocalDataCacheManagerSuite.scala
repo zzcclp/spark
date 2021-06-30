@@ -17,17 +17,21 @@
 
 package org.apache.spark.scheduler
 
+import com.google.common.hash.Hashing
+import org.apache.kylin.cache.scheduler.LocalDataCacheManager
+import org.apache.kylin.cache.utils.ConsistentHash
 import org.apache.spark.SparkFunSuite
 import org.apache.spark.resource.ResourceProfile
 import org.apache.spark.scheduler.cluster.ExecutorInfo
-import org.apache.kylin.cache.scheduler.LocalDataCacheManager
+
+import scala.collection.mutable
 
 class LocalDataCacheManagerSuite extends SparkFunSuite {
 
   test("Verify soft affinity strategy when some executors added and some executors removed") {
 
     val cm: LocalDataCacheManager = new LocalDataCacheManager
-    cm.setTotalExceptedExecutorsNum(4)
+    cm.setTotalExceptedExecutorsNum(6)
 
     val addEvent0 = SparkListenerExecutorAdded(System.currentTimeMillis(), "exec-0",
       new ExecutorInfo("host-1", 3, null, null, null, ResourceProfile.DEFAULT_RESOURCE_PROFILE_ID))
@@ -109,5 +113,67 @@ class LocalDataCacheManagerSuite extends SparkFunSuite {
     assert(softAffinityCandidates6.length == 2)
     assert(softAffinityCandidates6(0)._2.startsWith("exec-5"))
     assert(softAffinityCandidates6(1)._2.startsWith("exec-6"))
+  }
+
+  test("test hash code") {
+
+    val candidatesSize = 5
+    val resultSet = new mutable.HashMap[Int, Int]()
+    val executorHash = Hashing.crc32()
+    val cacheReplicatesNum = 1
+    val halfCandidatesSize = candidatesSize / cacheReplicatesNum
+    for (i <- 0 to 74) {
+      if (i != 71 && i != 73) {
+        val fileName =
+          //("s3a://raptorx-test/alluxio/data/raptorx_stress_data_s3/raptorx_stress_data/" +
+          ("jfs://raptorx1/" +
+            "part-%05d-1a66979d-d780-4d30-8390-8893914fcfe4-c000.snappy.parquet").format(i)
+        println(fileName)
+        // var mod = executorHash.hashBytes(fileName.getBytes).asInt % candidatesSize
+        var mod = fileName.hashCode % candidatesSize
+        val c1 = if (mod < 0) (mod + candidatesSize) else mod
+        println(c1)
+        var value = resultSet.getOrElse(c1, 0)
+        resultSet(c1) = value + 1
+
+        for (i <- 1 to (cacheReplicatesNum - 1)) {
+          val c2 = (c1 + halfCandidatesSize + i) % candidatesSize
+          println(c2)
+          var value = resultSet.getOrElse(c2, 0)
+          resultSet(c2) = value + 1
+        }
+      }
+    }
+    println(resultSet)
+  }
+
+  test("test ConsistentHash") {
+
+    val virtualNodesNum = 1
+    val consistentHash = new ConsistentHash[String](virtualNodesNum)
+
+    val candidatesSize = 15
+    for (i <- 0 until candidatesSize) {
+      consistentHash.addNode(i.toString)
+    }
+    val resultSet = new mutable.HashMap[Int, Int]()
+    val cacheReplicatesNum = 2
+    val halfCandidatesSize = candidatesSize / cacheReplicatesNum
+    for (i <- 0 to 73) {
+      val fileName =
+        "s3a://raptorx-test/alluxio/data/raptorx_stress_data_s3/raptorx_stress_data/part-%05d-1a66979d-d780-4d30-8390-8893914fcfe4-c000.snappy.parquet".format(i)
+      println(fileName)
+      val c1 = consistentHash.get(fileName).toInt
+      var value = resultSet.getOrElse(c1, 0)
+      resultSet(c1) = value + 1
+
+      for (i <- 1 to (cacheReplicatesNum - 1)) {
+        val c2 = consistentHash.get(fileName + i.toString).toInt
+        println(c2)
+        var value = resultSet.getOrElse(c2, 0)
+        resultSet(c2) = value + 1
+      }
+    }
+    println(resultSet)
   }
 }

@@ -28,10 +28,10 @@
 
   <artifactId>kylin-cache_2.12</artifactId>
   <packaging>jar</packaging>
-  <name>Spark Project SQL</name>
+  <name>Spark Kylin Cache</name>
   <url>http://spark.apache.org/</url>
   <properties>
-    <sbt.project.name>sql</sbt.project.name>
+    <sbt.project.name>kylincache</sbt.project.name>
   </properties>
 
   <dependencies>

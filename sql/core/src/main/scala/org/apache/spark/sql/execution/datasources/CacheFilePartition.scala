@@ -42,7 +42,7 @@ object CacheFilePartition extends Logging {
   def convertFilePartitionToCache(filePartition: FilePartition): CacheFilePartition = {
     // Calculate the target executors
     val locations = LocalDataCacheManager.askExecutor(Array(filePartition.files.head.filePath))
-    logInfo(s"========= Calculate ${filePartition.files.head.filePath} " +
+    logError(s"========= Calculate ${filePartition.files.head.filePath} " +
       s"on locations ${locations.mkString}")
     CacheFilePartition(filePartition.index, filePartition.files.map(p => {
       CachePartitionedFile(p.partitionValues, p.filePath, p.start, p.length, locations)
