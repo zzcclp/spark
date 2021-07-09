@@ -17,20 +17,16 @@
 
 package org.apache.spark.sql.execution
 
-import java.util.concurrent.TimeUnit._
-
-import scala.collection.mutable.HashMap
-
 import org.apache.commons.lang3.StringUtils
 import org.apache.hadoop.fs.Path
-
+import org.apache.kylin.cache.fs.CacheFileSystemConstants
 import org.apache.spark.rdd.RDD
-import org.apache.spark.sql.catalyst.{InternalRow, TableIdentifier}
 import org.apache.spark.sql.catalyst.catalog.BucketSpec
 import org.apache.spark.sql.catalyst.expressions._
 import org.apache.spark.sql.catalyst.plans.QueryPlan
 import org.apache.spark.sql.catalyst.plans.physical.{HashPartitioning, Partitioning, UnknownPartitioning}
 import org.apache.spark.sql.catalyst.util.truncatedString
+import org.apache.spark.sql.catalyst.{InternalRow, TableIdentifier}
 import org.apache.spark.sql.execution.datasources._
 import org.apache.spark.sql.execution.datasources.parquet.{ParquetFileFormat => ParquetSource}
 import org.apache.spark.sql.execution.metric.{SQLMetric, SQLMetrics}
@@ -40,6 +36,9 @@ import org.apache.spark.sql.types.StructType
 import org.apache.spark.sql.vectorized.ColumnarBatch
 import org.apache.spark.util.Utils
 import org.apache.spark.util.collection.BitSet
+
+import java.util.concurrent.TimeUnit._
+import scala.collection.mutable.HashMap
 
 trait DataSourceScanExec extends LeafExecNode {
   def relation: BaseRelation
@@ -611,7 +610,15 @@ case class FileSourceScanExec(
     val partitions =
       FilePartition.getFilePartitions(relation.sparkSession, splitFiles, maxSplitBytes)
 
-    new FileScanRDD(fsRelation.sparkSession, readFile, partitions)
+    if (relation.sparkSession.conf.get(CacheFileSystemConstants.PARAMS_KEY_USE_CACHE,
+      "false").toBoolean) {
+      val start = System.currentTimeMillis()
+      val cachePartitions = partitions.map(CacheFilePartition.convertFilePartitionToCache(_))
+      logWarning(s"======== Convert file partition took: ${(System.currentTimeMillis() - start)}")
+      new CacheFileScanRDD(fsRelation.sparkSession, readFile, cachePartitions)
+    } else {
+      new FileScanRDD(fsRelation.sparkSession, readFile, partitions)
+    }
   }
 
   // Filters unused DynamicPruningExpression expressions - one which has been replaced
