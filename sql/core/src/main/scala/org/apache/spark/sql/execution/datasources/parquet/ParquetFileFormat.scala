@@ -40,11 +40,13 @@ import org.apache.spark.sql.execution.vectorized.{OffHeapColumnVector, OnHeapCol
 import org.apache.spark.sql.internal.SQLConf
 import org.apache.spark.sql.sources._
 import org.apache.spark.sql.types._
+import org.apache.spark.sql.util.{ConfigurationUtils, ReflectionUtils}
 import org.apache.spark.util.{SerializableConfiguration, ThreadUtils}
 import org.apache.spark.{SparkException, TaskContext}
 
 import java.io.IOException
 import java.net.URI
+import java.util.Properties
 import scala.collection.JavaConverters._
 import scala.collection.mutable
 import scala.util.{Failure, Try}
@@ -225,8 +227,26 @@ class ParquetFileFormat
       SQLConf.PARQUET_INT96_AS_TIMESTAMP.key,
       sparkSession.sessionState.conf.isParquetINT96AsTimestamp)
 
+    //import scala.collection.JavaConversions._
+    var start = System.currentTimeMillis()
     val broadcastedHadoopConf =
       sparkSession.sparkContext.broadcast(new SerializableConfiguration(hadoopConf))
+    logError(s"---------------- broadcast hadoop conf ${hadoopConf.size()} " +
+      s"took: ${System.currentTimeMillis() - start}")
+    //logError("---------------- broadcast hadoop conf start")
+    //for (value <- hadoopConf) {
+    //  logError(s"---------------- broadcast hadoop value ${value.getKey}=${value.getValue}")
+    //}
+    //logError("---------------- broadcast hadoop conf end")
+    start = System.currentTimeMillis()
+    val overlayProps = ReflectionUtils.getAncestorField[Properties](
+      hadoopConf, 0, "overlay").asInstanceOf[Properties]
+    val broadcastedOverlay = sparkSession.sparkContext.broadcast(overlayProps)
+    logError(s"---------------- broadcast overlay hadoop conf ${overlayProps.size()} " +
+      s"took: ${System.currentTimeMillis() - start}")
+    //logError("---------------- broadcast overlay conf start")
+    //logError(s"---------------- broadcast overlay value ${overlayProps.toString}")
+    //logError("---------------- broadcast overlay conf end")
 
     // TODO: if you move this into the closure it reverts to the default values.
     // If true, enable using the custom RecordReader for parquet. This only works for
@@ -263,9 +283,36 @@ class ParquetFileFormat
           Array.empty,
           null)
 
-      val sharedConf = broadcastedHadoopConf.value.value
-
+      import scala.collection.JavaConversions._
       var start = System.currentTimeMillis()
+      val sharedConf1 = broadcastedHadoopConf.value.value
+      logError(s"---------------- broadcast get hadoop conf ${sharedConf1.size()} " +
+        s"took: ${System.currentTimeMillis() - start}")
+
+      start = System.currentTimeMillis()
+      logError(s"---------------- broadcast read default hadoop conf " +
+        s"${ConfigurationUtils.conf.size()} " +
+        s"took: ${System.currentTimeMillis() - start}")
+      //logError("---------------- broadcast read default hadoop conf start")
+      //for (value <- ConfigurationUtils.conf) {
+      //  logError(s"---------------- broadcast default value ${value.getKey}=${value.getValue}")
+      //}
+      //logError("---------------- broadcast read default hadoop conf end")
+      start = System.currentTimeMillis()
+      val overlay = broadcastedOverlay.value
+      val sharedConf = new Configuration(ConfigurationUtils.conf)
+      for (key <- overlay.stringPropertyNames()) {
+        sharedConf.set(key, overlay.getProperty(key))
+      }
+      logError(s"---------------- broadcast get overlay hadoop conf ${sharedConf.size()} " +
+        s"${overlay.size()} took: ${System.currentTimeMillis() - start}")
+      //logError("---------------- broadcast get overlay hadoop conf start")
+      //for (value <- defaultConf) {
+      //  logError(s"---------------- broadcast all value ${value.getKey}=${value.getValue}")
+      //}
+      //logError("---------------- broadcast get overlay hadoop conf end")
+
+      start = System.currentTimeMillis()
       val parquetMetaData = if (split.getRowGroupOffsets == null) {
         ParquetFooterReader.readFooter(sharedConf, filePath, range(split.getStart, split.getEnd))
       } else {
@@ -311,7 +358,7 @@ class ParquetFileFormat
 
       val attemptId = new TaskAttemptID(new TaskID(new JobID(), TaskType.MAP, 0), 0)
       val hadoopAttemptContext =
-        new TaskAttemptContextImpl(broadcastedHadoopConf.value.value, attemptId)
+        new TaskAttemptContextImpl(sharedConf, attemptId)
 
       // Try to push down filters when filter push-down is enabled.
       // Notice: This push-down is RowGroups level, not individual records.
