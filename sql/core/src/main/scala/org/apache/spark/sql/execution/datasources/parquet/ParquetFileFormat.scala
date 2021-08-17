@@ -229,6 +229,13 @@ class ParquetFileFormat
       SQLConf.PARQUET_INT96_AS_TIMESTAMP.key,
       sparkSession.sessionState.conf.isParquetINT96AsTimestamp)
 
+    hadoopConf.setBoolean(
+      SQLConf.FILE_META_CACHE_PARQUET_ENABLED.key,
+      sparkSession.sessionState.conf.fileMetaCacheParquetEnabled)
+    hadoopConf.setBoolean(
+      SQLConf.PARQUET_FOOTER_USE_OLD_API.key,
+      sparkSession.sessionState.conf.parquetFooterUseOldApi)
+
     // val broadcastedHadoopConf =
     //   sparkSession.sparkContext.broadcast(new SerializableConfiguration(hadoopConf))
     val start = System.currentTimeMillis()
@@ -284,11 +291,24 @@ class ParquetFileFormat
       logInfo(s"Get broadcasted overlay hadoop conf ${sharedConf.size()} " +
         s"${overlay.size()} took: ${System.currentTimeMillis() - start}")
 
-      lazy val footerFileMetaData =
-        ParquetFileReader.readFooter(sharedConf, filePath, SKIP_ROW_GROUPS).getFileMetaData
+      val metaCacheEnabled =
+        sharedConf.getBoolean(SQLConf.FILE_META_CACHE_PARQUET_ENABLED.key, false)
+      val useOldApiToReadFooter =
+        sharedConf.getBoolean(SQLConf.PARQUET_FOOTER_USE_OLD_API.key, false)
+
+      lazy val footer = if (split.getRowGroupOffsets == null) {
+        val start = System.currentTimeMillis()
+        val footerByRange = ParquetFileMetaUtils.readFooterByRange(metaCacheEnabled,
+          useOldApiToReadFooter, sharedConf, filePath, split.getStart(), split.getEnd())
+        logInfo(s"Read parquet footer in fileformat took: ${System.currentTimeMillis() - start}")
+        footerByRange
+      } else {
+        ParquetFileMetaUtils.readFooterByNoFilter(metaCacheEnabled, useOldApiToReadFooter,
+          sharedConf, filePath)
+      }
       // Try to push down filters when filter push-down is enabled.
       val pushed = if (enableParquetFilterPushDown) {
-        val parquetSchema = footerFileMetaData.getSchema
+        val parquetSchema = footer.getFileMetaData.getSchema
         val parquetFilters = new ParquetFilters(parquetSchema, pushDownDate, pushDownTimestamp,
           pushDownDecimal, pushDownStringStartWith, pushDownInFilterThreshold, isCaseSensitive)
         filters
@@ -307,7 +327,7 @@ class ParquetFileFormat
       // have different writers.
       // Define isCreatedByParquetMr as function to avoid unnecessary parquet footer reads.
       def isCreatedByParquetMr: Boolean =
-        footerFileMetaData.getCreatedBy().startsWith("parquet-mr")
+        footer.getFileMetaData.getCreatedBy().startsWith("parquet-mr")
 
       val convertTz =
         if (timestampConversion && !isCreatedByParquetMr) {
@@ -317,10 +337,10 @@ class ParquetFileFormat
         }
 
       val datetimeRebaseMode = DataSourceUtils.datetimeRebaseMode(
-        footerFileMetaData.getKeyValueMetaData.get,
+        footer.getFileMetaData.getKeyValueMetaData.get,
         SQLConf.get.getConf(SQLConf.LEGACY_PARQUET_REBASE_MODE_IN_READ))
       val int96RebaseMode = DataSourceUtils.int96RebaseMode(
-        footerFileMetaData.getKeyValueMetaData.get,
+        footer.getFileMetaData.getKeyValueMetaData.get,
         SQLConf.get.getConf(SQLConf.LEGACY_PARQUET_INT96_REBASE_MODE_IN_READ))
 
       val attemptId = new TaskAttemptID(new TaskID(new JobID(), TaskType.MAP, 0), 0)
@@ -343,6 +363,9 @@ class ParquetFileFormat
         val iter = new RecordReaderIterator(vectorizedReader)
         // SPARK-23457 Register a task completion listener before `initialization`.
         taskContext.foreach(_.addTaskCompletionListener[Unit](_ => iter.close()))
+        vectorizedReader.setFooter(footer)
+        vectorizedReader.setMetaCacheEnabled(metaCacheEnabled)
+        vectorizedReader.setUseOldApiToReadFooter(useOldApiToReadFooter)
         vectorizedReader.initialize(split, hadoopAttemptContext)
         logDebug(s"Appending $partitionSchema ${file.partitionValues}")
         vectorizedReader.initBatch(partitionSchema, file.partitionValues)
@@ -470,7 +493,7 @@ object ParquetFileFormat extends Logging {
         // ParquetFileReader.readFooter throws RuntimeException, instead of IOException,
         // when it can't read the footer.
         Some(new Footer(currentFile.getPath(),
-          ParquetFileReader.readFooter(
+          ParquetFooterReader.readFooter(
             conf, currentFile, SKIP_ROW_GROUPS)))
       } catch { case e: RuntimeException =>
         if (ignoreCorruptFiles) {
