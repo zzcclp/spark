@@ -23,6 +23,7 @@ import scala.collection.mutable.HashMap
 
 import org.apache.commons.lang3.StringUtils
 import org.apache.hadoop.fs.Path
+import org.apache.kylin.softaffinity.SoftAffinityManager
 
 import org.apache.spark.rdd.RDD
 import org.apache.spark.sql.catalyst.{InternalRow, TableIdentifier}
@@ -570,7 +571,14 @@ case class FileSourceScanExec(
       }
     }
 
-    new FileScanRDD(fsRelation.sparkSession, readFile, filePartitions)
+    if (SoftAffinityManager.usingSoftAffinity) {
+      val start = System.currentTimeMillis()
+      val cachePartitions = filePartitions.map(CacheFilePartition.convertFilePartitionToCache(_))
+      logInfo(s"Convert bucketed file partition took: ${(System.currentTimeMillis() - start)}")
+      new CacheFileScanRDD(fsRelation.sparkSession, readFile, cachePartitions)
+    } else {
+      new FileScanRDD(fsRelation.sparkSession, readFile, filePartitions)
+    }
   }
 
   /**
@@ -611,7 +619,14 @@ case class FileSourceScanExec(
     val partitions =
       FilePartition.getFilePartitions(relation.sparkSession, splitFiles, maxSplitBytes)
 
-    new FileScanRDD(fsRelation.sparkSession, readFile, partitions)
+    if (SoftAffinityManager.usingSoftAffinity) {
+      val start = System.currentTimeMillis()
+      val cachePartitions = partitions.map(CacheFilePartition.convertFilePartitionToCache(_))
+      logInfo(s"Convert file partition took: ${(System.currentTimeMillis() - start)}")
+      new CacheFileScanRDD(fsRelation.sparkSession, readFile, cachePartitions)
+    } else {
+      new FileScanRDD(fsRelation.sparkSession, readFile, partitions)
+    }
   }
 
   // Filters unused DynamicPruningExpression expressions - one which has been replaced

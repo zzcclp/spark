@@ -17,13 +17,6 @@
 
 package org.apache.spark.sql.execution.datasources.parquet
 
-import java.io.IOException
-import java.net.URI
-
-import scala.collection.JavaConverters._
-import scala.collection.mutable
-import scala.util.{Failure, Try}
-
 import org.apache.hadoop.conf.Configuration
 import org.apache.hadoop.fs.{FileStatus, Path}
 import org.apache.hadoop.mapreduce._
@@ -31,12 +24,10 @@ import org.apache.hadoop.mapreduce.task.TaskAttemptContextImpl
 import org.apache.parquet.filter2.compat.FilterCompat
 import org.apache.parquet.filter2.predicate.FilterApi
 import org.apache.parquet.format.converter.ParquetMetadataConverter.SKIP_ROW_GROUPS
-import org.apache.parquet.hadoop._
 import org.apache.parquet.hadoop.ParquetOutputFormat.JobSummaryLevel
+import org.apache.parquet.hadoop._
 import org.apache.parquet.hadoop.codec.CodecConfig
 import org.apache.parquet.hadoop.util.ContextUtil
-
-import org.apache.spark.{SparkException, TaskContext}
 import org.apache.spark.internal.Logging
 import org.apache.spark.sql._
 import org.apache.spark.sql.catalyst.InternalRow
@@ -50,6 +41,13 @@ import org.apache.spark.sql.internal.SQLConf
 import org.apache.spark.sql.sources._
 import org.apache.spark.sql.types._
 import org.apache.spark.util.{SerializableConfiguration, ThreadUtils}
+import org.apache.spark.{SparkException, TaskContext}
+
+import java.io.IOException
+import java.net.URI
+import scala.collection.JavaConverters._
+import scala.collection.mutable
+import scala.util.{Failure, Try}
 
 class ParquetFileFormat
   extends FileFormat
@@ -227,8 +225,28 @@ class ParquetFileFormat
       SQLConf.PARQUET_INT96_AS_TIMESTAMP.key,
       sparkSession.sessionState.conf.isParquetINT96AsTimestamp)
 
+    hadoopConf.setBoolean(
+      SQLConf.FILE_META_CACHE_PARQUET_ENABLED.key,
+      sparkSession.sessionState.conf.fileMetaCacheParquetEnabled)
+    hadoopConf.setBoolean(
+      SQLConf.PARQUET_FOOTER_USE_OLD_API.key,
+      sparkSession.sessionState.conf.parquetFooterUseOldApi)
+
+    val start = System.currentTimeMillis()
     val broadcastedHadoopConf =
       sparkSession.sparkContext.broadcast(new SerializableConfiguration(hadoopConf))
+    logInfo(s"Broadcast all hadoop conf ${hadoopConf.size()} " +
+      s"took: ${System.currentTimeMillis() - start}")
+
+    /* start = System.currentTimeMillis()
+    val overlayProps = ReflectionUtils.getAncestorField[Properties](
+      hadoopConf, 0, "overlay")
+    logInfo(s"Broadcast get overlay hadoop conf ${overlayProps.size()} " +
+      s"took: ${System.currentTimeMillis() - start}")
+    start = System.currentTimeMillis()
+    val broadcastedOverlay = sparkSession.sparkContext.broadcast(overlayProps)
+    logInfo(s"Broadcast overlay hadoop conf ${overlayProps.size()} " +
+      s"took: ${System.currentTimeMillis() - start}") */
 
     // TODO: if you move this into the closure it reverts to the default values.
     // If true, enable using the custom RecordReader for parquet. This only works for
@@ -265,13 +283,45 @@ class ParquetFileFormat
           Array.empty,
           null)
 
+      val start = System.currentTimeMillis()
       val sharedConf = broadcastedHadoopConf.value.value
+      logInfo(s"Get all broadcasted hadoop conf ${sharedConf.size()} " +
+        s"took: ${System.currentTimeMillis() - start}")
 
-      lazy val footerFileMetaData =
-        ParquetFileReader.readFooter(sharedConf, filePath, SKIP_ROW_GROUPS).getFileMetaData
+      /* start = System.currentTimeMillis()
+      val overlay = broadcastedOverlay.value
+      logInfo(s"Get broadcasted overlay conf ${overlay.size()} " +
+        s"took: ${System.currentTimeMillis() - start}")
+      start = System.currentTimeMillis()
+      val sharedConf = SparkHadoopUtil.get.newConfiguration(SparkEnv.get.conf)
+      logInfo(s"Generate hadoop conf ${sharedConf.size()} " +
+        s"took: ${System.currentTimeMillis() - start}")
+      start = System.currentTimeMillis()
+      for (keyValue <- overlay.entrySet().asScala) {
+        sharedConf.set(keyValue.getKey.asInstanceOf[String],
+          keyValue.getValue.asInstanceOf[String])
+      }
+      logInfo(s"Get broadcasted overlay hadoop conf ${sharedConf.size()} " +
+        s"${overlay.size()} took: ${System.currentTimeMillis() - start}") */
+
+      val metaCacheEnabled =
+        sharedConf.getBoolean(SQLConf.FILE_META_CACHE_PARQUET_ENABLED.key, false)
+      val useOldApiToReadFooter =
+        sharedConf.getBoolean(SQLConf.PARQUET_FOOTER_USE_OLD_API.key, false)
+
+      lazy val footer = if (split.getRowGroupOffsets == null) {
+        val start = System.currentTimeMillis()
+        val footerByRange = ParquetFileMetaUtils.readFooterByRange(metaCacheEnabled,
+          useOldApiToReadFooter, sharedConf, filePath, split.getStart(), split.getEnd())
+        logInfo(s"Read parquet footer in fileformat took: ${System.currentTimeMillis() - start}")
+        footerByRange
+      } else {
+        ParquetFileMetaUtils.readFooterByNoFilter(metaCacheEnabled, useOldApiToReadFooter,
+          sharedConf, filePath)
+      }
       // Try to push down filters when filter push-down is enabled.
       val pushed = if (enableParquetFilterPushDown) {
-        val parquetSchema = footerFileMetaData.getSchema
+        val parquetSchema = footer.getFileMetaData.getSchema
         val parquetFilters = new ParquetFilters(parquetSchema, pushDownDate, pushDownTimestamp,
           pushDownDecimal, pushDownStringStartWith, pushDownInFilterThreshold, isCaseSensitive)
         filters
@@ -290,7 +340,7 @@ class ParquetFileFormat
       // have different writers.
       // Define isCreatedByParquetMr as function to avoid unnecessary parquet footer reads.
       def isCreatedByParquetMr: Boolean =
-        footerFileMetaData.getCreatedBy().startsWith("parquet-mr")
+        footer.getFileMetaData.getCreatedBy().startsWith("parquet-mr")
 
       val convertTz =
         if (timestampConversion && !isCreatedByParquetMr) {
@@ -300,15 +350,15 @@ class ParquetFileFormat
         }
 
       val datetimeRebaseMode = DataSourceUtils.datetimeRebaseMode(
-        footerFileMetaData.getKeyValueMetaData.get,
+        footer.getFileMetaData.getKeyValueMetaData.get,
         SQLConf.get.getConf(SQLConf.LEGACY_PARQUET_REBASE_MODE_IN_READ))
       val int96RebaseMode = DataSourceUtils.int96RebaseMode(
-        footerFileMetaData.getKeyValueMetaData.get,
+        footer.getFileMetaData.getKeyValueMetaData.get,
         SQLConf.get.getConf(SQLConf.LEGACY_PARQUET_INT96_REBASE_MODE_IN_READ))
 
       val attemptId = new TaskAttemptID(new TaskID(new JobID(), TaskType.MAP, 0), 0)
       val hadoopAttemptContext =
-        new TaskAttemptContextImpl(broadcastedHadoopConf.value.value, attemptId)
+        new TaskAttemptContextImpl(sharedConf, attemptId)
 
       // Try to push down filters when filter push-down is enabled.
       // Notice: This push-down is RowGroups level, not individual records.
@@ -326,6 +376,9 @@ class ParquetFileFormat
         val iter = new RecordReaderIterator(vectorizedReader)
         // SPARK-23457 Register a task completion listener before `initialization`.
         taskContext.foreach(_.addTaskCompletionListener[Unit](_ => iter.close()))
+        vectorizedReader.setFooter(footer)
+        vectorizedReader.setMetaCacheEnabled(metaCacheEnabled)
+        vectorizedReader.setUseOldApiToReadFooter(useOldApiToReadFooter)
         vectorizedReader.initialize(split, hadoopAttemptContext)
         logDebug(s"Appending $partitionSchema ${file.partitionValues}")
         vectorizedReader.initBatch(partitionSchema, file.partitionValues)
@@ -453,7 +506,7 @@ object ParquetFileFormat extends Logging {
         // ParquetFileReader.readFooter throws RuntimeException, instead of IOException,
         // when it can't read the footer.
         Some(new Footer(currentFile.getPath(),
-          ParquetFileReader.readFooter(
+          ParquetFooterReader.readFooter(
             conf, currentFile, SKIP_ROW_GROUPS)))
       } catch { case e: RuntimeException =>
         if (ignoreCorruptFiles) {
