@@ -40,6 +40,21 @@ public class CacheFileSystemConstants {
 
     public static final long PARAMS_KEY_FILE_STATUS_CACHE_MAX_SIZE_DEFAULT_VALUE = 10000L;
 
+    public static final String PARAMS_KEY_MEM_MAX_SIZE =
+            "spark.kylin.local-cache.mem.max.size";
+
+    public static final long PARAMS_KEY_MEM_MAX_SIZE_DEFAULT_VALUE = 2048L;
+
+    public static final String PARAMS_KEY_MEM_PERFILE_SIZE_THRESHOLD =
+            "spark.kylin.local-cache.mem.per-file.size.threshold";
+
+    public static final int PARAMS_KEY_MEM_PERFILE_SIZE_THRESHOLD_DEFAULT_VALUE = 10;
+
+    public static final String PARAMS_KEY_MEM_ENABLED_DIRECT_BYTEBUFFER =
+            "spark.kylin.local-cache.mem.enabled.direct.bytebuffer";
+
+    public static final boolean PARAMS_KEY_MEM_ENABLED_DIRECT_BYTEBUFFER_DEFAULT_VALUE = false;
+
     public static final String PARAMS_KEY_USE_LEGACY_FILE_INPUTSTREAM =
             "spark.kylin.local-cache.use.legacy.file.input-stream";
 

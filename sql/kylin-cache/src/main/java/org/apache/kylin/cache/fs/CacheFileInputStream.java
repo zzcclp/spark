@@ -94,6 +94,7 @@ public class CacheFileInputStream extends FSInputStream implements ByteBufferRea
         throw new IOException("Mark/reset not supported");
     }
 
+    @Override
     public synchronized int read() throws IOException {
         if (buf == null)
             throw new IOException(
@@ -105,6 +106,7 @@ public class CacheFileInputStream extends FSInputStream implements ByteBufferRea
         return buf.get() & 0xFF;
     }
 
+    @Override
     public synchronized int read(byte[] b, int off, int len) throws IOException {
         if (off < 0 || len < 0 || b.length - off < len)
             throw new IndexOutOfBoundsException();
@@ -126,7 +128,7 @@ public class CacheFileInputStream extends FSInputStream implements ByteBufferRea
         if (len == 0)
             return read;
         // buf is empty, read data from mInputStream directly
-        int more = read(mInputStream.getPos(), b, off, len);
+        int more = readInternal(b, off, len);
         if (more <= 0) {
             if (read > 0) {
                 return read;
@@ -140,35 +142,16 @@ public class CacheFileInputStream extends FSInputStream implements ByteBufferRea
         return read + more;
     }
 
-    private boolean refill() throws IOException {
-        buf.clear();
-        int read = read(mInputStream.getPos(), buf);
-        if (read <= 0) {
-            buf.limit(0);
-            return false; // EOF
-        }
-        statistics.incrementBytesRead(-read);
-        buf.flip();
-        return true;
-    }
-
-    @Override
-    public synchronized int read(long pos, byte[] b, int off, int len) throws IOException {
+    protected synchronized int readInternal(byte[] b, int off, int len) throws IOException {
         if (len == 0)
             return 0;
         if (buf == null)
             throw new IOException(
                     "Reading file " + this.file.toString() + " error, stream was closed");
-        if (pos < 0)
-            throw new EOFException(
-                    "Reading file " + this.file.toString() + " error, position is negative");
         if (b == null || off < 0 || len < 0 || b.length - off < len) {
             throw new IllegalArgumentException(
                     "Reading file " + this.file.toString() + " error, invalid arguments: " +
                             off + " " + len);
-        }
-        if (len > 128 << 20) {
-            len = 128 << 20;
         }
         int got = mInputStream.read(b, off, len);
         if (got == 0)
@@ -183,6 +166,50 @@ public class CacheFileInputStream extends FSInputStream implements ByteBufferRea
         return got;
     }
 
+    private boolean refill() throws IOException {
+        buf.clear();
+        int read = readInternal(buf);
+        if (read <= 0) {
+            buf.limit(0);
+            return false; // EOF
+        }
+        statistics.incrementBytesRead(-read);
+        buf.flip();
+        return true;
+    }
+
+    @Override
+    public synchronized int read(long pos, byte[] b, int off, int len) throws IOException {
+        if (len == 0)
+            return 0;
+        if (pos < 0)
+            throw new EOFException(
+                    "Reading file " + this.file.toString() + " error, position is negative");
+        if (b == null || off < 0 || len < 0 || b.length - off < len) {
+            throw new IllegalArgumentException(
+                    "Reading file " + this.file.toString() + " error, invalid arguments: " +
+                            off + " " + len);
+        }
+        long oldPos = mInputStream.getPos();
+        mInputStream.seek(pos);
+        int got = -1;
+        try {
+            got = mInputStream.read(b, off, len);
+            if (got == 0)
+                return -1;
+            if (got == EINVAL)
+                throw new IOException(
+                        "Reading file " + this.file.toString() + " error, stream was closed");
+            if (got < 0)
+                throw new IOException(
+                        "Reading file " + this.file.toString() + " error, stream was closed");
+        } finally {
+            mInputStream.seek(oldPos);
+        }
+        statistics.incrementBytesRead(got);
+        return got;
+    }
+
     @Override
     public synchronized int read(ByteBuffer b) throws IOException {
         if (!b.hasRemaining())
@@ -193,15 +220,16 @@ public class CacheFileInputStream extends FSInputStream implements ByteBufferRea
         if (!buf.hasRemaining() && b.remaining() <= buf.capacity() && !refill()) {
             return -1;
         }
-        int got = 0;
-        while (b.hasRemaining() && buf.hasRemaining()) {
-            b.put(buf.get());
-            got ++;
+        int got = Math.min(b.remaining(), buf.remaining());
+        if (got > 0) {
+            byte[] readedBytes = new byte[got];
+            buf.get(readedBytes, 0, got);
+            b.put(readedBytes, 0, got);
+            statistics.incrementBytesRead(got);
         }
-        statistics.incrementBytesRead(got);
         if (!b.hasRemaining())
             return got;
-        int more = read(mInputStream.getPos(), b);
+        int more = readInternal(b);
         if (more <= 0)
             return got > 0 ? got : -1;
         buf.position(0);
@@ -209,13 +237,13 @@ public class CacheFileInputStream extends FSInputStream implements ByteBufferRea
         return got + more;
     }
 
-    public synchronized int read(long pos, ByteBuffer b) throws IOException {
+    protected synchronized int readInternal(ByteBuffer b) throws IOException {
         if (!b.hasRemaining())
             return 0;
         int got;
         if (b.hasArray()) {
             // for heap bytebuffer
-            got = read(pos, b.array(), b.position(), b.remaining());
+            got = readInternal(b.array(), b.position(), b.remaining());
             if (got <= 0)
                 return got;
             b.position(b.position() + got);

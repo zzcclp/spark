@@ -60,8 +60,7 @@ private[sql] object FileMetaCacheManager extends Logging {
 
   def get(dataFile: FileMetaKey): FileMeta = {
     val fileMeta = cache.get(dataFile)
-    logInfo(s"Get file metadata cache hit: ${cache.stats().hitCount()}, " +
-      s"total:${cache.stats().requestCount()}.")
+    logInfo(s"Get file metadata cache hit rate: ${cache.stats().hitRate()}.")
     fileMeta
   }
 

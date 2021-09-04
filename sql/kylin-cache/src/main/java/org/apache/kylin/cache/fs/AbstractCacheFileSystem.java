@@ -38,6 +38,7 @@ import org.apache.hadoop.fs.FileSystem;
 import org.apache.hadoop.fs.FilterFileSystem;
 import org.apache.hadoop.fs.Path;
 //import org.apache.hadoop.util.DirectBufferPool;
+import org.apache.hadoop.io.IOUtils;
 import org.apache.hadoop.util.ReflectionUtils;
 import org.apache.kylin.cache.utils.ReflectionUtil;
 import org.slf4j.Logger;
@@ -46,6 +47,7 @@ import org.slf4j.LoggerFactory;
 import java.io.FileNotFoundException;
 import java.io.IOException;
 import java.net.URI;
+import java.nio.ByteBuffer;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.Properties;
@@ -58,6 +60,7 @@ import static java.nio.charset.StandardCharsets.UTF_8;
 public abstract class AbstractCacheFileSystem extends FilterFileSystem {
 
     private static final Logger LOG = LoggerFactory.getLogger(AbstractCacheFileSystem.class);
+    private static final int MByte = 1 << 20;
 
     //private static final DirectBufferPool bufferPool = new DirectBufferPool();
 
@@ -70,6 +73,12 @@ public abstract class AbstractCacheFileSystem extends FilterFileSystem {
     protected LocalCacheFileInStream.FileInStreamOpener mAlluxioFileOpener;
     protected CacheManager mCacheManager;
     protected AlluxioConfiguration mAlluxioConf;
+
+    protected long memMaxSize = 2048L;
+    protected boolean enabledMemCached = false;
+    protected int memPerFileSizeThreshold = 10;
+    protected boolean memEnabledDirectBytebuffer = false;
+    protected LoadingCache<Path, ByteBuffer> memFileCache;
 
     protected LoadingCache<Path, FileStatus> fileStatusCache;
 
@@ -182,6 +191,37 @@ public abstract class AbstractCacheFileSystem extends FilterFileSystem {
 
         // create LocalCacheFileSystem if needs
         if (this.isUseLocalCache()) {
+            // create mem cached, which will cache all file
+            this.memMaxSize =
+                    conf.getLong(CacheFileSystemConstants.PARAMS_KEY_MEM_MAX_SIZE,
+                            CacheFileSystemConstants.PARAMS_KEY_MEM_MAX_SIZE_DEFAULT_VALUE) * MByte;
+            this.memPerFileSizeThreshold =
+                    conf.getInt(CacheFileSystemConstants.PARAMS_KEY_MEM_PERFILE_SIZE_THRESHOLD,
+                            CacheFileSystemConstants
+                                    .PARAMS_KEY_MEM_PERFILE_SIZE_THRESHOLD_DEFAULT_VALUE) * MByte;
+            this.enabledMemCached =
+                    (this.memMaxSize > 0L) && (this.memMaxSize > this.memPerFileSizeThreshold);
+            assert this.memPerFileSizeThreshold > 0 :
+                    CacheFileSystemConstants.PARAMS_KEY_MEM_PERFILE_SIZE_THRESHOLD +
+                            " must be greater than 0";
+            if (this.enabledMemCached) {
+                this.memEnabledDirectBytebuffer =
+                        conf.getBoolean(CacheFileSystemConstants
+                                        .PARAMS_KEY_MEM_ENABLED_DIRECT_BYTEBUFFER,
+                                CacheFileSystemConstants
+                                        .PARAMS_KEY_MEM_ENABLED_DIRECT_BYTEBUFFER_DEFAULT_VALUE);
+                CacheLoader<Path, ByteBuffer> memFileCacheLoader = new CacheLoader<Path, ByteBuffer>() {
+                    @Override
+                    public ByteBuffer load(Path path) throws Exception {
+                        return readOneSmallFile(path);
+                    }
+                };
+                this.memFileCache =
+                        CacheBuilder.newBuilder()
+                                .maximumSize(this.memMaxSize / this.memPerFileSizeThreshold)
+                                .recordStats()
+                                .build(memFileCacheLoader);
+            }
             // Todo: Can set local cache dir here for the current executor
             this.createLocalCacheManager(this.getUri(), conf);
             LOG.info("Create LocalCacheFileSystem successfully .");
@@ -190,6 +230,24 @@ public abstract class AbstractCacheFileSystem extends FilterFileSystem {
 
     protected FileStatus getFileStatusForCache(Path path) throws IOException {
         return this.fs.getFileStatus(path);
+    }
+
+    protected ByteBuffer readOneSmallFile(Path p) throws IOException {
+        long start = System.currentTimeMillis();
+        Path f = this.fs.makeQualified(p);
+        FileStatus fileStatus = this.getFileStatus(f);
+        int fileLength = (int)fileStatus.getLen();
+        ByteBuffer fileByteBuffer = ByteBuffer.allocate(fileLength);
+        IOUtils.readFully(this.fs.open(f, bufferSize), fileByteBuffer.array(), 0, fileLength);
+        flipMemByteBuffer(fileByteBuffer, fileLength);
+        LOG.info("Read small file {} to be cached, took: {}", f,
+                System.currentTimeMillis() - start);
+        return fileByteBuffer;
+    }
+
+    protected void flipMemByteBuffer(ByteBuffer byteBuffer, int cap) {
+        byteBuffer.flip();
+        byteBuffer.limit(cap);
     }
 
     @Override
@@ -226,64 +284,63 @@ public abstract class AbstractCacheFileSystem extends FilterFileSystem {
         if (size < this.bufferSize) {
             size = this.bufferSize;
         }
-        //int numWords = (size + 7) / 8;
-        //int alignedSize = numWords * 8;
-        //assert (alignedSize >= size);
-        //return alignedSize;
+        //  int numWords = (size + 7) / 8;
+        //  int alignedSize = numWords * 8;
+        //  assert (alignedSize >= size);
+        //  return alignedSize;
         return size;
     }
 
-    @Override
-    public FSDataInputStream open(Path f, int bufferSize) throws IOException {
-        if (this.mCacheManager != null
-                && this.isUseLocalCache() && this.isUseLocalCacheForTargetExecs()) {
-            FileStatus fileStatus = this.getFileStatus(f);
-            FileInfo fileInfo = wrapFileInfo(fileStatus);
-            // FilePath is a unique identifier for a file, however it can be a long string
-            // hence using md5 hash of the file path as the identifier in the cache.
-            CacheContext context = CacheContext.defaults().setCacheIdentifier(
-                    md5().hashString(fileStatus.getPath().toString(), UTF_8).toString());
-            URIStatus status = new URIStatus(fileInfo, context);
-            LOG.info("Use local cache FileSystem to open file {} .", f);
-            /* return new FSDataInputStream(new AlluxioHdfsFileInputStream(
-                    new LocalCacheFileInStream(status, mAlluxioFileOpener, mCacheManager,
-                    mAlluxioConf), statistics)); */
-            /* return new FSDataInputStream(new CacheFileInputStream(f,
-                    new LocalCacheFileInStream(status, mAlluxioFileOpener, mCacheManager,
-                            mAlluxioConf),
-                    null, statistics, checkBufferSize(bufferSize)));*/
-            if (this.useLegacyFileInputStream) {
-                return new FSDataInputStream(new AlluxioHdfsFileInputStream(
-                        new LocalCacheFileInStream(status, mAlluxioFileOpener, mCacheManager,
-                                mAlluxioConf), statistics));
-            }
-            return new FSDataInputStream(new CacheFileInputStream(f,
-                    new LocalCacheFileInStream(status, mAlluxioFileOpener, mCacheManager,
-                            mAlluxioConf),
-                    null, statistics, checkBufferSize(bufferSize)));
+    protected ByteBuffer readByteBufferFromCache(Path p) {
+        try {
+            return this.memFileCache.get(p);
+        } catch (ExecutionException e) {
+            LOG.error("Get small file " + p + " from cache error: ", e);
         }
-        LOG.info("Use original FileSystem to open file {} .", f);
-        return super.open(f, bufferSize);
+        return null;
     }
 
-    /**
-     * Only for testing
-     */
-    public FSDataInputStream open(Path f, int bufferSize, boolean useLocalCacheForExec) throws IOException {
-        if (this.mCacheManager != null
-                && this.isUseLocalCache() && useLocalCacheForExec) {
+    @Override
+    public FSDataInputStream open(Path p, int bufferSize) throws IOException {
+        return this.open(p, bufferSize, this.isUseLocalCacheForTargetExecs());
+    }
+
+    public FSDataInputStream open(Path p, int bufferSize, boolean useLocalCacheForExec) throws IOException {
+        Path f = this.fs.makeQualified(p);
+
+        if (this.isUseLocalCache()) {
             FileStatus fileStatus = this.getFileStatus(f);
-            FileInfo fileInfo = wrapFileInfo(fileStatus);
-            // FilePath is a unique identifier for a file, however it can be a long string
-            // hence using md5 hash of the file path as the identifier in the cache.
-            CacheContext context = CacheContext.defaults().setCacheIdentifier(
-                    md5().hashString(fileStatus.getPath().toString(), UTF_8).toString());
-            URIStatus status = new URIStatus(fileInfo, context);
-            LOG.info("Use local cache FileSystem to open file {} .", f);
-            return new FSDataInputStream(new CacheFileInputStream(f,
-                    new LocalCacheFileInStream(status, mAlluxioFileOpener,
-                            mCacheManager, mAlluxioConf),
-                    null, statistics, checkBufferSize(bufferSize)));
+            int fileLength = (int)fileStatus.getLen();
+            if (this.enabledMemCached && (fileLength < this.memPerFileSizeThreshold)) {
+                // read all file data from cache
+                long start = System.currentTimeMillis();
+                ByteBuffer buf = readByteBufferFromCache(f).asReadOnlyBuffer();
+                if (buf != null) {
+                    LOG.info("Get small file {} from cache took: {}, hit rate {}", p,
+                            (System.currentTimeMillis() - start),
+                            this.memFileCache.stats().hitRate());
+                    return new FSDataInputStream(new MemCacheFileInputStream(f, buf, fileLength,
+                            this.statistics));
+                }
+            }
+            if (this.mCacheManager != null && useLocalCacheForExec) {
+                FileInfo fileInfo = wrapFileInfo(fileStatus);
+                // FilePath is a unique identifier for a file, however it can be a long string
+                // hence using md5 hash of the file path as the identifier in the cache.
+                CacheContext context = CacheContext.defaults().setCacheIdentifier(
+                        md5().hashString(fileStatus.getPath().toString(), UTF_8).toString());
+                URIStatus status = new URIStatus(fileInfo, context);
+                LOG.info("Use local cache FileSystem to open file {} .", f);
+                if (this.useLegacyFileInputStream) {
+                    return new FSDataInputStream(new AlluxioHdfsFileInputStream(
+                            new LocalCacheFileInStream(status, mAlluxioFileOpener, mCacheManager,
+                                    mAlluxioConf), statistics));
+                }
+                return new FSDataInputStream(new CacheFileInputStream(f,
+                        new LocalCacheFileInStream(status, mAlluxioFileOpener, mCacheManager,
+                                mAlluxioConf),
+                        null, statistics, checkBufferSize(bufferSize)));
+            }
         }
         LOG.info("Use original FileSystem to open file {} .", f);
         return super.open(f, bufferSize);
@@ -330,5 +387,61 @@ public abstract class AbstractCacheFileSystem extends FilterFileSystem {
 
     public void setUseLocalCache(boolean useLocalCache) {
         this.useLocalCache = useLocalCache;
+    }
+
+    public int getBufferSize() {
+        return bufferSize;
+    }
+
+    public void setBufferSize(int bufferSize) {
+        this.bufferSize = bufferSize;
+    }
+
+    public boolean isUseLegacyFileInputStream() {
+        return useLegacyFileInputStream;
+    }
+
+    public void setUseLegacyFileInputStream(boolean useLegacyFileInputStream) {
+        this.useLegacyFileInputStream = useLegacyFileInputStream;
+    }
+
+    public long getMemMaxSize() {
+        return memMaxSize;
+    }
+
+    public void setMemMaxSize(long memMaxSize) {
+        this.memMaxSize = memMaxSize;
+    }
+
+    public boolean isEnabledMemCached() {
+        return enabledMemCached;
+    }
+
+    public void setEnabledMemCached(boolean enabledMemCached) {
+        this.enabledMemCached = enabledMemCached;
+    }
+
+    public int getMemPerFileSizeThreshold() {
+        return memPerFileSizeThreshold;
+    }
+
+    public void setMemPerFileSizeThreshold(int memPerFileSizeThreshold) {
+        this.memPerFileSizeThreshold = memPerFileSizeThreshold;
+    }
+
+    public boolean isMemEnabledDirectBytebuffer() {
+        return memEnabledDirectBytebuffer;
+    }
+
+    public void setMemEnabledDirectBytebuffer(boolean memEnabledDirectBytebuffer) {
+        this.memEnabledDirectBytebuffer = memEnabledDirectBytebuffer;
+    }
+
+    public LoadingCache<Path, ByteBuffer> getMemFileCache() {
+        return memFileCache;
+    }
+
+    public LoadingCache<Path, FileStatus> getFileStatusCache() {
+        return fileStatusCache;
     }
 }
