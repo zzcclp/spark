@@ -31,6 +31,8 @@ import alluxio.wire.FileInfo;
 import com.google.common.cache.CacheBuilder;
 import com.google.common.cache.CacheLoader;
 import com.google.common.cache.LoadingCache;
+import com.google.common.cache.RemovalListener;
+import com.google.common.cache.RemovalNotification;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.fs.FSDataInputStream;
 import org.apache.hadoop.fs.FileStatus;
@@ -50,9 +52,12 @@ import java.net.URI;
 import java.nio.ByteBuffer;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.Properties;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicLong;
 
 import static com.google.common.hash.Hashing.md5;
 import static java.nio.charset.StandardCharsets.UTF_8;
@@ -77,8 +82,12 @@ public abstract class AbstractCacheFileSystem extends FilterFileSystem {
     protected long memMaxSize = 2048L;
     protected boolean enabledMemCached = false;
     protected int memPerFileSizeThreshold = 10;
+    protected long memPerFileCacheTtl = 300L;
     protected boolean memEnabledDirectBytebuffer = false;
-    protected LoadingCache<Path, ByteBuffer> memFileCache;
+    protected LoadingCache<FileStatus, ByteBuffer> memFileCache;
+    protected AtomicLong memTotalFileSize = new AtomicLong(0L);
+    protected AtomicInteger memTotalFileCnt = new AtomicInteger(0);
+    protected ConcurrentHashMap<FileStatus, Long> allReadedFiles = new ConcurrentHashMap<>();
 
     protected LoadingCache<Path, FileStatus> fileStatusCache;
 
@@ -210,16 +219,34 @@ public abstract class AbstractCacheFileSystem extends FilterFileSystem {
                                         .PARAMS_KEY_MEM_ENABLED_DIRECT_BYTEBUFFER,
                                 CacheFileSystemConstants
                                         .PARAMS_KEY_MEM_ENABLED_DIRECT_BYTEBUFFER_DEFAULT_VALUE);
-                CacheLoader<Path, ByteBuffer> memFileCacheLoader = new CacheLoader<Path, ByteBuffer>() {
+                this.memPerFileCacheTtl =
+                        conf.getLong(CacheFileSystemConstants.PARAMS_KEY_MEM_PERFILE_CACHE_TTL,
+                                CacheFileSystemConstants
+                                        .PARAMS_KEY_MEM_PERFILE_CACHE_TTL_DEFAULT_VALUE);
+                CacheLoader<FileStatus, ByteBuffer> memFileCacheLoader =
+                        new CacheLoader<FileStatus, ByteBuffer>() {
                     @Override
-                    public ByteBuffer load(Path path) throws Exception {
-                        return readOneSmallFile(path);
+                    public ByteBuffer load(FileStatus fileStatus) throws Exception {
+                        return readOneSmallFile(fileStatus);
                     }
                 };
                 this.memFileCache =
                         CacheBuilder.newBuilder()
-                                .maximumSize(this.memMaxSize / this.memPerFileSizeThreshold)
+                                //.maximumSize(this.memMaxSize / this.memPerFileSizeThreshold)
+                                .expireAfterAccess(this.memPerFileCacheTtl, TimeUnit.SECONDS)
                                 .recordStats()
+                                .removalListener(new RemovalListener<FileStatus, ByteBuffer>() {
+                                    @Override
+                                    public void onRemoval(RemovalNotification<FileStatus,
+                                            ByteBuffer> notification) {
+                                        memTotalFileSize.addAndGet(-(notification.getKey().getLen()));
+                                        memTotalFileCnt.decrementAndGet();
+                                        LOG.info("Remove file {} from cache, total file size: {} " +
+                                                        "and total cached file cnt: {}",
+                                                notification.getKey().getPath(),
+                                                memTotalFileSize.get(), memTotalFileCnt.get());
+                                    }
+                                })
                                 .build(memFileCacheLoader);
             }
             // Todo: Can set local cache dir here for the current executor
@@ -232,16 +259,18 @@ public abstract class AbstractCacheFileSystem extends FilterFileSystem {
         return this.fs.getFileStatus(path);
     }
 
-    protected ByteBuffer readOneSmallFile(Path p) throws IOException {
+    protected ByteBuffer readOneSmallFile(FileStatus fileStatus) throws IOException {
         long start = System.currentTimeMillis();
-        Path f = this.fs.makeQualified(p);
-        FileStatus fileStatus = this.getFileStatus(f);
         int fileLength = (int)fileStatus.getLen();
         ByteBuffer fileByteBuffer = ByteBuffer.allocate(fileLength);
-        IOUtils.readFully(this.fs.open(f, bufferSize), fileByteBuffer.array(), 0, fileLength);
+        IOUtils.readFully(this.fs.open(fileStatus.getPath(), bufferSize), fileByteBuffer.array(), 0,
+                fileLength);
         flipMemByteBuffer(fileByteBuffer, fileLength);
-        LOG.info("Read small file {} to be cached, took: {}", f,
-                System.currentTimeMillis() - start);
+        memTotalFileSize.addAndGet(fileStatus.getLen());
+        memTotalFileCnt.incrementAndGet();
+        LOG.info("Read small file {} to be cached, total file size: {}, total cached file cnt: " +
+                        "{}, took: {}", fileStatus.getPath(), memTotalFileSize.get(),
+                memTotalFileCnt.get(), System.currentTimeMillis() - start);
         return fileByteBuffer;
     }
 
@@ -291,11 +320,11 @@ public abstract class AbstractCacheFileSystem extends FilterFileSystem {
         return size;
     }
 
-    protected ByteBuffer readByteBufferFromCache(Path p) {
+    protected ByteBuffer readByteBufferFromCache(FileStatus fileStatus) {
         try {
-            return this.memFileCache.get(p);
+            return this.memFileCache.get(fileStatus);
         } catch (ExecutionException e) {
-            LOG.error("Get small file " + p + " from cache error: ", e);
+            LOG.error("Get small file " + fileStatus.getPath() + " from cache error: ", e);
         }
         return null;
     }
@@ -311,10 +340,14 @@ public abstract class AbstractCacheFileSystem extends FilterFileSystem {
         if (this.isUseLocalCache()) {
             FileStatus fileStatus = this.getFileStatus(f);
             int fileLength = (int)fileStatus.getLen();
-            if (this.enabledMemCached && (fileLength < this.memPerFileSizeThreshold)) {
+            allReadedFiles.put(fileStatus, fileStatus.getLen());
+            LOG.info("Will open file {}, the file size is {}, all readed files cnt: {}",
+                    fileStatus.getPath(), fileLength, this.allReadedFiles.size());
+            if (this.enabledMemCached && (fileLength < this.memPerFileSizeThreshold)
+                    && ((this.memTotalFileSize.get() + fileLength) < this.memMaxSize)) {
                 // read all file data from cache
                 long start = System.currentTimeMillis();
-                ByteBuffer buf = readByteBufferFromCache(f).asReadOnlyBuffer();
+                ByteBuffer buf = readByteBufferFromCache(fileStatus).asReadOnlyBuffer();
                 if (buf != null) {
                     LOG.info("Get small file {} from cache took: {}, hit rate {}", p,
                             (System.currentTimeMillis() - start),
@@ -437,7 +470,7 @@ public abstract class AbstractCacheFileSystem extends FilterFileSystem {
         this.memEnabledDirectBytebuffer = memEnabledDirectBytebuffer;
     }
 
-    public LoadingCache<Path, ByteBuffer> getMemFileCache() {
+    public LoadingCache<FileStatus, ByteBuffer> getMemFileCache() {
         return memFileCache;
     }
 

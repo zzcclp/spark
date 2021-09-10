@@ -55,6 +55,11 @@ public class CacheFileSystemConstants {
 
     public static final boolean PARAMS_KEY_MEM_ENABLED_DIRECT_BYTEBUFFER_DEFAULT_VALUE = false;
 
+    public static final String PARAMS_KEY_MEM_PERFILE_CACHE_TTL =
+            "spark.kylin.local-cache.mem.per-file.cache.ttl";
+
+    public static final long PARAMS_KEY_MEM_PERFILE_CACHE_TTL_DEFAULT_VALUE = 300L;
+
     public static final String PARAMS_KEY_USE_LEGACY_FILE_INPUTSTREAM =
             "spark.kylin.local-cache.use.legacy.file.input-stream";
 
