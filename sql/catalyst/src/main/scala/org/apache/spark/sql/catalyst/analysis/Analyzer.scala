@@ -206,7 +206,12 @@ class Analyzer(override val catalogManager: CatalogManager)
   override def execute(plan: LogicalPlan): LogicalPlan = {
     AnalysisContext.reset()
     try {
-      executeSameContext(plan)
+      logInfo("--SparkCube-- Analyzer Start")
+      val lg = executeSameContext(plan)
+      logInfo(RuleExecutor.dumpTimeSpent())
+      logInfo("--SparkCube-- Analyzer End")
+      RuleExecutor.resetMetrics()
+      lg
     } finally {
       AnalysisContext.reset()
     }
