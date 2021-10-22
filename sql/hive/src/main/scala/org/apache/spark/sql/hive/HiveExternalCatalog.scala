@@ -25,6 +25,7 @@ import java.util.Locale
 import scala.collection.mutable
 import scala.util.control.NonFatal
 
+import com.google.common.cache.{CacheBuilder, CacheLoader}
 import org.apache.hadoop.conf.Configuration
 import org.apache.hadoop.fs.{FileSystem, Path}
 import org.apache.hadoop.hive.ql.metadata.HiveException
@@ -38,7 +39,6 @@ import org.apache.spark.sql.catalyst.analysis.TableAlreadyExistsException
 import org.apache.spark.sql.catalyst.catalog._
 import org.apache.spark.sql.catalyst.catalog.ExternalCatalogUtils._
 import org.apache.spark.sql.catalyst.expressions._
-import org.apache.spark.sql.catalyst.plans.logical.ColumnStat
 import org.apache.spark.sql.catalyst.util.CaseInsensitiveMap
 import org.apache.spark.sql.execution.command.DDLUtils
 import org.apache.spark.sql.execution.datasources.{PartitioningUtils, SourceOptions}
@@ -55,9 +55,44 @@ import org.apache.spark.sql.types.{DataType, StructType}
 private[spark] class HiveExternalCatalog(conf: SparkConf, hadoopConf: Configuration)
   extends ExternalCatalog with Logging {
 
+  import CatalogTableType._
   import CatalogTypes.TablePartitionSpec
   import HiveExternalCatalog._
-  import CatalogTableType._
+
+  private val isSparkCubeEnabled = conf.getBoolean("spark.kylin.sparkcube.enabled", false)
+
+  private val hiveDbCache = CacheBuilder.newBuilder()
+    .maximumSize(conf.get("spark.sql.cache.cacheMetaSize", "100").toInt)
+    .recordStats()
+    .build[String, Option[CatalogDatabase]](
+      new CacheLoader[String, Option[CatalogDatabase]]() {
+        override def load(key: String): Option[CatalogDatabase] = {
+          if (client.databaseExists(key)) {
+            Some(client.getDatabase(key))
+          } else {
+            None
+          }
+        }
+      })
+
+  private val hiveTableCache = CacheBuilder.newBuilder()
+    .maximumSize(conf.get("spark.sql.cache.cacheMetaSize", "1000").toInt)
+    .recordStats()
+    .build[(String, String),
+      (Option[CatalogTable], Option[CatalogTable], Option[mutable.Map[String, String]])](
+      new CacheLoader[(String, String),
+        (Option[CatalogTable], Option[CatalogTable], Option[mutable.Map[String, String]])]() {
+        override def load(key: (String, String)): (Option[CatalogTable],
+          Option[CatalogTable], Option[mutable.Map[String, String]]) = {
+          if (client.tableExists(key._1, key._2)) {
+            val catalogTable = client.getTable(key._1, key._2)
+            (Some(catalogTable), Some(restoreTableMetadata(catalogTable)),
+              Some(tableMetaToTableProps(catalogTable, catalogTable.schema)))
+          } else {
+            (None, None, None)
+          }
+        }
+      })
 
   /**
    * A Hive client used to interact with the metastore.
@@ -115,7 +150,11 @@ private[spark] class HiveExternalCatalog(conf: SparkConf, hadoopConf: Configurat
    * before returning it.
    */
   private[hive] def getRawTable(db: String, table: String): CatalogTable = {
-    client.getTable(db, table)
+    if (isSparkCubeEnabled) {
+      hiveTableCache.get((db, table))._1.get
+    } else {
+      client.getTable(db, table)
+    }
   }
 
   /**
@@ -208,11 +247,19 @@ private[spark] class HiveExternalCatalog(conf: SparkConf, hadoopConf: Configurat
   }
 
   override def getDatabase(db: String): CatalogDatabase = withClient {
-    client.getDatabase(db)
+    if (isSparkCubeEnabled) {
+      hiveDbCache.get(db).get
+    } else {
+      client.getDatabase(db)
+    }
   }
 
   override def databaseExists(db: String): Boolean = withClient {
-    client.databaseExists(db)
+    if (isSparkCubeEnabled) {
+      hiveDbCache.get(db).isDefined
+    } else {
+      client.databaseExists(db)
+    }
   }
 
   override def listDatabases(): Seq[String] = withClient {
@@ -407,7 +454,11 @@ private[spark] class HiveExternalCatalog(conf: SparkConf, hadoopConf: Configurat
    * can be used as table properties later.
    */
   private def tableMetaToTableProps(table: CatalogTable): mutable.Map[String, String] = {
-    tableMetaToTableProps(table, table.schema)
+    if (isSparkCubeEnabled) {
+      hiveTableCache.get((table.identifier.database.get, table.identifier.table))._3.get
+    } else {
+      tableMetaToTableProps(table, table.schema)
+    }
   }
 
   private def tableMetaToTableProps(
@@ -697,7 +748,11 @@ private[spark] class HiveExternalCatalog(conf: SparkConf, hadoopConf: Configurat
   }
 
   override def getTable(db: String, table: String): CatalogTable = withClient {
-    restoreTableMetadata(getRawTable(db, table))
+    if (isSparkCubeEnabled) {
+      hiveTableCache.get((db, table))._2.get
+    } else {
+      restoreTableMetadata(getRawTable(db, table))
+    }
   }
 
   /**
@@ -822,7 +877,11 @@ private[spark] class HiveExternalCatalog(conf: SparkConf, hadoopConf: Configurat
   }
 
   override def tableExists(db: String, table: String): Boolean = withClient {
-    client.tableExists(db, table)
+    if (isSparkCubeEnabled) {
+      hiveTableCache.get((db, table))._1.isDefined
+    } else {
+      client.tableExists(db, table)
+    }
   }
 
   override def listTables(db: String): Seq[String] = withClient {

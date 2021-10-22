@@ -483,7 +483,7 @@ case class FileSourceScanExec(
   }
 
   private def getBlockLocations(file: FileStatus): Array[BlockLocation] = file match {
-    case f: LocatedFileStatus => f.getBlockLocations
+    case f: LocatedFileStatus => Array.empty[BlockLocation] // f.getBlockLocations
     case f => Array.empty[BlockLocation]
   }
 

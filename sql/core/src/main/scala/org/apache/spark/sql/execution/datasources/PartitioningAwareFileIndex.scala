@@ -27,7 +27,7 @@ import org.apache.spark.sql.SparkSession
 import org.apache.spark.sql.catalyst.{expressions, InternalRow}
 import org.apache.spark.sql.catalyst.expressions._
 import org.apache.spark.sql.catalyst.util.{CaseInsensitiveMap, DateTimeUtils}
-import org.apache.spark.sql.types.{StringType, StructType}
+import org.apache.spark.sql.types.StructType
 
 /**
  * An abstract class that represents [[FileIndex]]s that are aware of partitioned tables.
@@ -50,7 +50,12 @@ abstract class PartitioningAwareFileIndex(
   override def partitionSchema: StructType = partitionSpec().partitionColumns
 
   protected val hadoopConf: Configuration =
-    sparkSession.sessionState.newHadoopConfWithOptions(parameters)
+    if (parameters.isEmpty || sparkSession.sparkContext.getConf.getBoolean(
+      "spark.kylin.sparkcube.enabled", false)) {
+      sparkSession.sparkContext.hadoopConfiguration
+    } else {
+      sparkSession.sessionState.newHadoopConfWithOptions(parameters)
+    }
 
   protected def leafFiles: mutable.LinkedHashMap[Path, FileStatus]
 
