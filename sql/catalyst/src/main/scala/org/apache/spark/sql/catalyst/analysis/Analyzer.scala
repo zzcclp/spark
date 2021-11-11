@@ -187,7 +187,12 @@ class Analyzer(override val catalogManager: CatalogManager)
   override def execute(plan: LogicalPlan): LogicalPlan = {
     AnalysisContext.reset()
     try {
-      executeSameContext(plan)
+      logInfo("--Catalyst-- Analyzer Start")
+      val lg = executeSameContext(plan)
+      logInfo(RuleExecutor.dumpTimeSpent())
+      logInfo("--Catalyst-- Analyzer End")
+      RuleExecutor.resetMetrics()
+      lg
     } finally {
       AnalysisContext.reset()
     }
