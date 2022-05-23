@@ -32,7 +32,7 @@
   <url>http://spark.apache.org/</url>
   <properties>
     <sbt.project.name>kylincache</sbt.project.name>
-    <alluxio.version>2.6.1</alluxio.version>
+    <alluxio.version>2.7.4</alluxio.version>
   </properties>
 
   <dependencies>
