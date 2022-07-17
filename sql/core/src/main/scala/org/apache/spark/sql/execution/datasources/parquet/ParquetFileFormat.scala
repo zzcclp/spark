@@ -17,6 +17,13 @@
 
 package org.apache.spark.sql.execution.datasources.parquet
 
+import java.io.IOException
+import java.net.URI
+
+import scala.collection.JavaConverters._
+import scala.collection.mutable
+import scala.util.{Failure, Try}
+
 import org.apache.hadoop.conf.Configuration
 import org.apache.hadoop.fs.{FileStatus, Path}
 import org.apache.hadoop.mapreduce._
@@ -24,10 +31,12 @@ import org.apache.hadoop.mapreduce.task.TaskAttemptContextImpl
 import org.apache.parquet.filter2.compat.FilterCompat
 import org.apache.parquet.filter2.predicate.FilterApi
 import org.apache.parquet.format.converter.ParquetMetadataConverter.SKIP_ROW_GROUPS
-import org.apache.parquet.hadoop.ParquetOutputFormat.JobSummaryLevel
 import org.apache.parquet.hadoop._
+import org.apache.parquet.hadoop.ParquetOutputFormat.JobSummaryLevel
 import org.apache.parquet.hadoop.codec.CodecConfig
 import org.apache.parquet.hadoop.util.ContextUtil
+
+import org.apache.spark.{SparkException, TaskContext}
 import org.apache.spark.internal.Logging
 import org.apache.spark.sql._
 import org.apache.spark.sql.catalyst.InternalRow
@@ -41,13 +50,6 @@ import org.apache.spark.sql.internal.SQLConf
 import org.apache.spark.sql.sources._
 import org.apache.spark.sql.types._
 import org.apache.spark.util.{SerializableConfiguration, ThreadUtils}
-import org.apache.spark.{SparkException, TaskContext}
-
-import java.io.IOException
-import java.net.URI
-import scala.collection.JavaConverters._
-import scala.collection.mutable
-import scala.util.{Failure, Try}
 
 class ParquetFileFormat
   extends FileFormat

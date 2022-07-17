@@ -17,14 +17,15 @@
 
 package org.apache.kylin.softaffinity
 
+import java.util.concurrent.atomic.AtomicInteger
+import java.util.concurrent.locks.ReentrantReadWriteLock
+
+import scala.collection.mutable
+
 import org.apache.kylin.softaffinity.strategy.SoftAffinityStrategy
 
-import java.util.concurrent.locks.ReentrantReadWriteLock
-import scala.collection.mutable
 import org.apache.spark.SparkEnv
 import org.apache.spark.internal.Logging
-
-import java.util.concurrent.atomic.AtomicInteger
 
 object SoftAffinityManager extends Logging {
 

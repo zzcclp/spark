@@ -17,9 +17,10 @@
 
 package org.apache.kylin.softaffinity.strategy
 
+import scala.collection.mutable.ListBuffer
+
 import org.apache.kylin.softaffinity.SoftAffinityConstants
 
-import scala.collection.mutable.ListBuffer
 import org.apache.spark.SparkEnv
 
 trait SoftAffinityAllocationTrait {

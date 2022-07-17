@@ -19,7 +19,7 @@ package org.apache.spark.sql.execution.datasources
 
 import org.apache.kylin.cache.fs.CacheFileSystemConstants
 
-import org.apache.spark.{SparkEnv, TaskContext, Partition => RDDPartition}
+import org.apache.spark.{Partition => RDDPartition, SparkEnv, TaskContext}
 import org.apache.spark.sql.SparkSession
 import org.apache.spark.sql.catalyst.InternalRow
 
