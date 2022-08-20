@@ -252,12 +252,12 @@ trait JoinSelectionHelper {
     val buildLeft = if (hintOnly) {
       hintToShuffleHashJoinLeft(hint)
     } else {
-      canBuildLocalHashMapBySize(left, conf) && muchSmaller(left, right)
+      canBuildLocalHashMapBySize(left, conf) && muchSmaller(left, right, conf)
     }
     val buildRight = if (hintOnly) {
       hintToShuffleHashJoinRight(hint)
     } else {
-      canBuildLocalHashMapBySize(right, conf) && muchSmaller(right, left)
+      canBuildLocalHashMapBySize(right, conf) && muchSmaller(right, left, conf)
     }
     getBuildSide(
       canBuildShuffledHashJoinLeft(joinType) && buildLeft,
@@ -370,14 +370,15 @@ trait JoinSelectionHelper {
   }
 
   /**
-   * Returns whether plan a is much smaller (3X) than plan b.
+   * Returns true if the data size of plan a multiplied by SHUFFLE_HASH_JOIN_FACTOR
+   * is smaller than plan b.
    *
    * The cost to build hash map is higher than sorting, we should only build hash map on a table
    * that is much smaller than other one. Since we does not have the statistic for number of rows,
    * use the size of bytes here as estimation.
    */
-  private def muchSmaller(a: LogicalPlan, b: LogicalPlan): Boolean = {
-    a.stats.sizeInBytes * 3 <= b.stats.sizeInBytes
+  private def muchSmaller(a: LogicalPlan, b: LogicalPlan, conf: SQLConf): Boolean = {
+    a.stats.sizeInBytes * conf.getConf(SQLConf.SHUFFLE_HASH_JOIN_FACTOR) <= b.stats.sizeInBytes
   }
 }
 
