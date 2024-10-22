@@ -224,8 +224,13 @@ object InjectRuntimeFilter extends Rule[LogicalPlan] with PredicateHelper with J
 
   private def isProbablyShuffleJoin(left: LogicalPlan,
       right: LogicalPlan, hint: JoinHint): Boolean = {
-    !hintToBroadcastLeft(hint) && !hintToBroadcastRight(hint) &&
-      !canBroadcastBySize(left, conf) && !canBroadcastBySize(right, conf)
+    if (conf.getConfString("spark.sql.optimizer.runtime.bloomFilter.considered.bhj", "true")
+      .toBoolean) {
+      !hintToBroadcastLeft(hint) && !hintToBroadcastRight(hint) &&
+        !canBroadcastBySize(left, conf) && !canBroadcastBySize(right, conf)
+    } else {
+      true
+    }
   }
 
   private def probablyHasShuffle(plan: LogicalPlan): Boolean = {
