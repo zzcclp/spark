@@ -267,15 +267,6 @@ object InjectRuntimeFilter extends Rule[LogicalPlan] with PredicateHelper with J
     }
   }
 
-  def hasRuntimeFilter(left: LogicalPlan, right: LogicalPlan, leftKey: Expression,
-      rightKey: Expression): Boolean = {
-    if (conf.runtimeFilterBloomFilterEnabled) {
-      hasBloomFilter(left, right, leftKey, rightKey)
-    } else {
-      hasInSubquery(left, right, leftKey, rightKey)
-    }
-  }
-
   // This checks if there is already a DPP filter, as this rule is called just after DPP.
   @tailrec
   def hasDynamicPruningSubquery(
@@ -293,15 +284,7 @@ object InjectRuntimeFilter extends Rule[LogicalPlan] with PredicateHelper with J
     }
   }
 
-  def hasBloomFilter(
-      left: LogicalPlan,
-      right: LogicalPlan,
-      leftKey: Expression,
-      rightKey: Expression): Boolean = {
-    findBloomFilterWithExp(left, leftKey) || findBloomFilterWithExp(right, rightKey)
-  }
-
-  private def findBloomFilterWithExp(plan: LogicalPlan, key: Expression): Boolean = {
+  private def hasBloomFilter(plan: LogicalPlan, key: Expression): Boolean = {
     plan.exists {
       case Filter(condition, _) =>
         splitConjunctivePredicates(condition).exists {
@@ -336,28 +319,33 @@ object InjectRuntimeFilter extends Rule[LogicalPlan] with PredicateHelper with J
         (leftKeys, rightKeys).zipped.foreach((l, r) => {
           // Check if:
           // 1. There is already a DPP filter on the key
-          // 2. There is already a runtime filter (Bloom filter or IN subquery) on the key
-          // 3. The keys are simple cheap expressions
+          // 2. The keys are simple cheap expressions
           if (filterCounter < numFilterThreshold &&
             !hasDynamicPruningSubquery(left, right, l, r) &&
-            !hasRuntimeFilter(newLeft, newRight, l, r) &&
             isSimpleExpression(l) && isSimpleExpression(r)) {
             val oldLeft = newLeft
             val oldRight = newRight
-            // Check if the current join is a shuffle join or a broadcast join that
-            // has a shuffle below it
+            // Check if:
+            // 1. The current join type supports prune the left side with runtime filter
+            // 2. The current join is a shuffle join or a broadcast join that
+            //    has a shuffle below it
+            // 3. There is no bloom filter on the left key yet
             val hasShuffle = isProbablyShuffleJoin(left, right, hint)
-            if (canPruneLeft(joinType) && (hasShuffle || probablyHasShuffle(left))) {
+            if (canPruneLeft(joinType) && (hasShuffle || probablyHasShuffle(left)) &&
+              !hasBloomFilter(newLeft, l)) {
               extractBeneficialFilterCreatePlan(left, right, l, r).foreach {
                 case (filterCreationSideKey, filterCreationSidePlan) =>
                   newLeft = injectFilter(l, newLeft, filterCreationSideKey, filterCreationSidePlan)
               }
             }
             // Did we actually inject on the left? If not, try on the right
-            // Check if the current join is a shuffle join or a broadcast join that
-            // has a shuffle below it
+            // Check if:
+            // 1. The current join type supports prune the right side with runtime filter
+            // 2. The current join is a shuffle join or a broadcast join that
+            //    has a shuffle below it
+            // 3. There is no bloom filter on the right key yet
             if (newLeft.fastEquals(oldLeft) && canPruneRight(joinType) &&
-              (hasShuffle || probablyHasShuffle(right))) {
+              (hasShuffle || probablyHasShuffle(right)) && !hasBloomFilter(newRight, r)) {
               extractBeneficialFilterCreatePlan(right, left, r, l).foreach {
                 case (filterCreationSideKey, filterCreationSidePlan) =>
                   newRight = injectFilter(
